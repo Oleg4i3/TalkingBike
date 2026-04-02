@@ -187,6 +187,11 @@ public class SpeedometerService extends Service {
 
     public void announceNow(boolean includeCurrentSpeed) {
         if (!ttsReady) return;
+        // Guard against two triggers firing within 2 s of each other (e.g. torch callback
+        // racing with screen-on receiver, or avgRunnable overlapping with a manual call).
+        long now = System.currentTimeMillis();
+        if (lastAnyAnnounceMs > 0 && (now - lastAnyAnnounceMs) < 2000L) return;
+
         float speed = calculator.getSmoothedSpeed();
         float avg   = calculator.getAverageSpeed(avgPeriodMin);
         float dist  = calculator.getTotalDistanceKm();
@@ -339,21 +344,38 @@ public class SpeedometerService extends Service {
         screenOnReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context ctx, Intent intent) {
-                if (!Intent.ACTION_SCREEN_ON.equals(intent.getAction())) return;
+                String action = intent.getAction();
+                if (action == null) return;
                 if (state != TrackState.RUNNING) return;
-
-                KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-                if (km != null && !km.isKeyguardLocked()) return;
 
                 long now = System.currentTimeMillis();
                 long debounceMs = (long) screenAnnounceDebounceSec * 1000L;
-                if (now - lastScreenAnnounceMs < debounceMs) return;
-                lastScreenAnnounceMs = now;
 
-                announceNow(true);
+                if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                    // Only announce on lock screen (phone in pocket, glove-tap on power button).
+                    // When the screen comes on while already unlocked, skip — the user is
+                    // actively looking at the phone; no need to speak.
+                    KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                    if (km != null && !km.isKeyguardLocked()) return;
+
+                    if (now - lastScreenAnnounceMs < debounceMs) return;
+                    lastScreenAnnounceMs = now;
+                    announceNow(true);
+
+                } else if (Intent.ACTION_USER_PRESENT.equals(action)) {
+                    // Fired when the user dismisses the keyguard (unlock swipe / PIN / biometric).
+                    // If we already announced on ACTION_SCREEN_ON a moment ago, the debounce
+                    // will block a second announcement here — preventing the double-speak on
+                    // "wake screen → unlock" sequences.
+                    if (now - lastScreenAnnounceMs < debounceMs) return;
+                    lastScreenAnnounceMs = now;
+                    announceNow(true);
+                }
             }
         };
-        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_USER_PRESENT);
         registerReceiver(screenOnReceiver, filter);
     }
 
@@ -379,6 +401,9 @@ public class SpeedometerService extends Service {
     private void speak(String text) {
         if (!ttsReady || tts == null) return;
         if (state == TrackState.PAUSED) return;
+
+        // Cancel any in-flight enhanced audio so it doesn't overlap with the new utterance
+        if (audioEnhancer != null) audioEnhancer.cancel();
 
         // Prevent the audio from re-triggering the torch callback
         lastTorchMs = System.currentTimeMillis();

@@ -31,10 +31,17 @@ public class AudioEnhancer {
     private float gainDb = 12f;
 
     private MediaPlayer mediaPlayer;
+    private volatile boolean cancelled = false;
 
     public AudioEnhancer(Context context, TextToSpeech tts) {
         this.context = context;
         this.tts     = tts;
+    }
+
+    /** Stop any in-progress synthesis or playback immediately. */
+    public void cancel() {
+        cancelled = true;
+        releasePlayer();
     }
 
     public void setGainDb(float db) {
@@ -42,6 +49,7 @@ public class AudioEnhancer {
     }
 
     public void speak(String text, Runnable onDone) {
+        cancelled = false;
         File rawFile = new File(context.getCacheDir(), TTS_FILE);
 
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
@@ -50,8 +58,13 @@ public class AudioEnhancer {
 
             @Override
             public void onDone(String id) {
+                if (cancelled) {
+                    if (onDone != null) onDone.run();
+                    return;
+                }
                 try {
                     File enhanced = processWav(rawFile, gainDb);
+                    if (cancelled) { if (onDone != null) onDone.run(); return; }
                     playFile(enhanced, onDone);
                 } catch (Exception e) {
                     Log.e(TAG, "Processing failed", e);
