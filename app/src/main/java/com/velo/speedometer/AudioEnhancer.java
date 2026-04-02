@@ -192,32 +192,17 @@ public class AudioEnhancer {
 
             // MBC band 0 (<1.5 kHz): compress aggressively
             DynamicsProcessing.MbcBand mbc0 = new DynamicsProcessing.MbcBand(
-                    true, 1500f,
-                    0f,   // preGainDb
-                    -18f, // attackTime ms (reused as threshold here — API uses attackTime)
-                    50f, 200f, // attack/release ms
-                    6f,   // ratio
-                    -18f, // threshold
-                    3f,   // kneeWidth
-                    0f,   // noiseGateThreshold
-                    0f,   // expanderRatio
-                    0f,   // preGain
-                    0f    // postGain
-            );
+			true, 1500f, 50f, 200f, 6f, -18f, 3f, 0f, 0f, 0f, 0f);
             dynProc.setMbcBandAllChannelsTo(0, mbc0);
 
             // MBC band 1 (>1.5 kHz): lighter compression
-            DynamicsProcessing.MbcBand mbc1 = new DynamicsProcessing.MbcBand(
-                    true, 20000f,
-                    0f, 30f, 50f, 200f,
-                    4f, -24f, 3f, 0f, 0f, 0f, 0f
-            );
+           DynamicsProcessing.MbcBand mbc1 = new DynamicsProcessing.MbcBand(
+			true, 20000f, 50f, 200f, 4f, -24f, 3f, 0f, 0f, 0f, 0f);
             dynProc.setMbcBandAllChannelsTo(1, mbc1);
 
             // Limiter: hard ceiling at −1 dBFS
-            dynProc.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
-                    true, 5f, 50f, -1f, 3f, 0f, 0f));
-
+           dynProc.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
+			true, true, 0, 5f, 50f, 10f, -1f, 0f));
             dynProc.setEnabled(true);
         } catch (Exception e) {
             Log.w(TAG, "DynamicsProcessing setup failed: " + e.getMessage());
