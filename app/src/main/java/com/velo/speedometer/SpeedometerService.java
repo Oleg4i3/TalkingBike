@@ -11,7 +11,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
-import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraManager;
 import android.location.Location;
 import android.location.LocationListener;
@@ -44,43 +43,35 @@ public class SpeedometerService extends Service {
     public static final String ACTION_PAUSE    = "sb.PAUSE";
     public static final String ACTION_ANNOUNCE = "sb.ANNOUNCE";
 
-    // ── Binder ────────────────────────────────────────────────────────────────
     private final IBinder binder = new LocalBinder();
     public class LocalBinder extends Binder {
         public SpeedometerService getService() { return SpeedometerService.this; }
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────
     public enum TrackState { STOPPED, RUNNING, PAUSED }
     private TrackState state = TrackState.STOPPED;
     private boolean ttsReady = false;
 
-    // ── Hardware helpers ──────────────────────────────────────────────────────
     private LocationManager locationManager;
     private CameraManager   cameraManager;
     private CameraManager.TorchCallback torchCallback;
     private long lastTorchMs = 0;
     private static final long TORCH_DEBOUNCE_MS = 2000;
 
-    // ── Screen-on receiver ────────────────────────────────────────────────────
     private BroadcastReceiver screenOnReceiver;
     private long lastScreenAnnounceMs = 0;
 
-    // ── Audio ─────────────────────────────────────────────────────────────────
     private TextToSpeech  tts;
     private AudioEnhancer audioEnhancer;
 
-    // ── Timers ────────────────────────────────────────────────────────────────
     private SpeedCalculator calculator;
     private Handler         handler;
     private Runnable        avgRunnable;
-    private long            lastSpeedAnnounceMs = 0;  // tracks last SPEED announce
-    private long            lastAnyAnnounceMs   = 0;  // tracks any announce (for max-silence)
+    private long            lastSpeedAnnounceMs = 0;
+    private long            lastAnyAnnounceMs   = 0;
 
-    // ── Auto-pause state ──────────────────────────────────────────────────────
-    private long slowStartMs = -1;   // when we first noticed speed < autoPauseSpeedKmh
+    private long slowStartMs = -1;
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────
     private SpeedListener listener;
 
     public interface SpeedListener {
@@ -88,11 +79,10 @@ public class SpeedometerService extends Service {
         void onStateChanged(TrackState state);
     }
 
-    // ── Settings (loaded on start) ────────────────────────────────────────────
     private float   speedThresholdKmh;
     private long    speedDebounceMs;
     private long    maxSilenceMs;
-    private int     avgPeriodMin;          // 0 = whole ride
+    private int     avgPeriodMin;
     private int     avgIntervalMin;
     private boolean doAnnounceSpeed;
     private boolean doAnnounceAvg;
@@ -105,7 +95,6 @@ public class SpeedometerService extends Service {
     private boolean enhancedAudioEnabled;
     private float   gainDb;
 
-    // ─────────────────────────────────────────────────────────────────────────
     @Override
     public void onCreate() {
         super.onCreate();
@@ -131,7 +120,6 @@ public class SpeedometerService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return binder; }
 
-    // ── Public API ────────────────────────────────────────────────────────────
     public TrackState getState() { return state; }
     public void setSpeedListener(SpeedListener l) { listener = l; }
 
@@ -189,7 +177,6 @@ public class SpeedometerService extends Service {
             slowStartMs = -1;
             notifyStateChanged();
             lastAnyAnnounceMs = System.currentTimeMillis();
-            calculator.resetAnnouncedSpeed();
             if (doAnnounceAvg) scheduleAvgTimer();
             updateNotification(calculator.getSmoothedSpeed(),
                     calculator.getAverageSpeed(avgPeriodMin),
@@ -216,13 +203,10 @@ public class SpeedometerService extends Service {
         if (sb.length() > 0) {
             speak(sb.toString().trim());
             lastAnyAnnounceMs = System.currentTimeMillis();
-            // reset speed-change timer so the next period starts fresh
             lastSpeedAnnounceMs = lastAnyAnnounceMs;
-            calculator.resetAnnouncedSpeed();
         }
     }
 
-    // ── Location ──────────────────────────────────────────────────────────────
     private void requestLocationUpdates() {
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
         try {
@@ -244,12 +228,10 @@ public class SpeedometerService extends Service {
             float avg   = calculator.getAverageSpeed(avgPeriodMin);
             float dist  = calculator.getTotalDistanceKm();
 
-            // Always update UI even when paused (GPS stays alive to keep lock)
             if (listener != null) listener.onSpeedUpdate(speed, avg, dist);
 
             if (state != TrackState.RUNNING) return;
 
-            // ── Auto-pause logic ──────────────────────────────────────────────
             if (autoPauseEnabled) {
                 if (speed < 3f) {
                     if (slowStartMs < 0) slowStartMs = now;
@@ -262,12 +244,10 @@ public class SpeedometerService extends Service {
                     slowStartMs = -1;
                 }
             }
-            // Auto-resume
             if (state == TrackState.PAUSED && speed > 6f) {
                 togglePause();
             }
 
-            // ── Walking speed ─────────────────────────────────────────────────
             if (walkingSpeedEnabled && speed < 6f && speed > 0.5f) {
                 if (doAnnounceSpeed &&
                         calculator.shouldAnnounceSpeed(speedThresholdKmh, speedDebounceMs)) {
@@ -279,7 +259,6 @@ public class SpeedometerService extends Service {
                 return;
             }
 
-            // ── Speed-change announce ─────────────────────────────────────────
             if (doAnnounceSpeed) {
                 boolean forceByMaxSilence = maxSilenceMs > 0
                         && lastAnyAnnounceMs > 0
@@ -289,7 +268,6 @@ public class SpeedometerService extends Service {
                     speak(fmtSpeed(speed));
                     lastAnyAnnounceMs   = now;
                     lastSpeedAnnounceMs = now;
-                    calculator.resetAnnouncedSpeed();
                 } else if (calculator.shouldAnnounceSpeed(speedThresholdKmh, speedDebounceMs)) {
                     speak(fmtSpeed(speed));
                     lastAnyAnnounceMs   = now;
@@ -303,18 +281,15 @@ public class SpeedometerService extends Service {
         @Override public void onProviderDisabled(@NonNull String p) { speak("GPS disabled"); }
     };
 
-    // ── Avg timer ─────────────────────────────────────────────────────────────
     private void scheduleAvgTimer() {
         avgRunnable = () -> {
             if (state == TrackState.RUNNING) {
-                // Announce avg+distance; also current speed IF not recently announced
                 float speed = calculator.getSmoothedSpeed();
                 float avg   = calculator.getAverageSpeed(avgPeriodMin);
                 float dist  = calculator.getTotalDistanceKm();
                 long  now   = System.currentTimeMillis();
 
                 StringBuilder sb = new StringBuilder();
-                // Include current speed in timer announce if not recently said
                 if (doAnnounceSpeed && lastSpeedAnnounceMs > 0
                         && (now - lastSpeedAnnounceMs) > 30_000L) {
                     sb.append(fmtSpeed(speed)).append(". ");
@@ -328,7 +303,6 @@ public class SpeedometerService extends Service {
                     speak(sb.toString().trim());
                     lastAnyAnnounceMs   = now;
                     lastSpeedAnnounceMs = now;
-                    calculator.resetAnnouncedSpeed();
                 }
                 scheduleAvgTimer();
             }
@@ -336,7 +310,6 @@ public class SpeedometerService extends Service {
         handler.postDelayed(avgRunnable, (long) avgIntervalMin * 60_000L);
     }
 
-    // ── Torch listener ────────────────────────────────────────────────────────
     private void registerTorchListener() {
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
         torchCallback = new CameraManager.TorchCallback() {
@@ -362,7 +335,6 @@ public class SpeedometerService extends Service {
         }
     }
 
-    // ── Screen-on receiver ────────────────────────────────────────────────────
     private void registerScreenReceiver() {
         screenOnReceiver = new BroadcastReceiver() {
             @Override
@@ -370,12 +342,9 @@ public class SpeedometerService extends Service {
                 if (!Intent.ACTION_SCREEN_ON.equals(intent.getAction())) return;
                 if (state != TrackState.RUNNING) return;
 
-                // Strategy A: only if phone is still locked
-                KeyguardManager km =
-                        (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                 if (km != null && !km.isKeyguardLocked()) return;
 
-                // Strategy B: debounce
                 long now = System.currentTimeMillis();
                 long debounceMs = (long) screenAnnounceDebounceSec * 1000L;
                 if (now - lastScreenAnnounceMs < debounceMs) return;
@@ -395,7 +364,6 @@ public class SpeedometerService extends Service {
         }
     }
 
-    // ── TTS / AudioEnhancer ───────────────────────────────────────────────────
     private void initTts() {
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
@@ -410,7 +378,6 @@ public class SpeedometerService extends Service {
 
     private void speak(String text) {
         if (!ttsReady || tts == null) return;
-        // Silence during pause
         if (state == TrackState.PAUSED) return;
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -425,7 +392,6 @@ public class SpeedometerService extends Service {
         }
     }
 
-    // ── Notification ──────────────────────────────────────────────────────────
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
@@ -465,7 +431,7 @@ public class SpeedometerService extends Service {
                 .addAction(android.R.drawable.ic_delete,               "■ Stop",  stopPi)
                 .setOngoing(true)
                 .setSilent(true)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)  // show on lock screen
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
     }
 
@@ -478,13 +444,12 @@ public class SpeedometerService extends Service {
         if (listener != null) listener.onStateChanged(state);
     }
 
-    // ── Settings ──────────────────────────────────────────────────────────────
     private void loadSettings() {
         SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
         speedThresholdKmh        = p.getFloat("speed_threshold", 5f);
         speedDebounceMs          = p.getInt("speed_debounce", 10) * 1000L;
         maxSilenceMs             = p.getInt("max_announce_interval", 60) * 1000L;
-        avgPeriodMin             = p.getInt("avg_period", 10);   // 0 = whole ride
+        avgPeriodMin             = p.getInt("avg_period", 10);
         avgIntervalMin           = p.getInt("avg_interval", 2);
         doAnnounceSpeed          = p.getBoolean("announce_speed",    true);
         doAnnounceAvg            = p.getBoolean("announce_avg",      true);
@@ -500,7 +465,6 @@ public class SpeedometerService extends Service {
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     private String fmtSpeed(float kmh) {
         return "Speed " + Math.round(kmh);
     }
