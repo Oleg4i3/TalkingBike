@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- ═══ SPEED ANNOUNCEMENT ═══ -->
+        <TextView style="@style/SectionHeader" android:text="SPEED ANNOUNCEMENT"/>
+
+        <LinearLayout style="@style/Card" android:orientation="vertical">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Speed change threshold (km/h)"
+                        android:textColor="@color/colorTextSecondary" android:textSize="12sp"/>
+                    <EditText android:id="@+id/etThreshold"
+                        android:layout_width="110dp" android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" android:maxLines="1"
+                        android:textColor="@color/colorText" android:textSize="20sp"
+                        android:backgroundTint="@color/colorAccent"/>
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnInfoThreshold"
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Min. time between alerts (seconds)"
+                        android:textColor="@color/colorTextSecondary" android:textSize="12sp"/>
+                    <EditText android:id="@+id/etDebounce"
+                        android:layout_width="110dp" android:layout_height="wrap_content"
+                        android:inputType="number" android:maxLines="1"
+                        android:textColor="@color/colorText" android:textSize="20sp"
+                        android:backgroundTint="@color/colorAccent"/>
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnInfoDebounce"
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <CheckBox android:id="@+id/cbSpeed"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:buttonTint="@color/colorAccent"
+                android:text="@string/cb_announce_speed"
+                android:textColor="@color/colorText" android:textSize="15sp"/>
+        </LinearLayout>
+
+        <!-- ═══ AVERAGE SPEED ═══ -->
+        <TextView style="@style/SectionHeader" android:text="AVERAGE SPEED"/>
+
+        <LinearLayout style="@style/Card" android:orientation="vertical">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Calculation period (minutes)"
+                        android:textColor="@color/colorTextSecondary" android:textSize="12sp"/>
+                    <EditText android:id="@+id/etAvgPeriod"
+                        android:layout_width="110dp" android:layout_height="wrap_content"
+                        android:inputType="number" android:maxLines="1"
+                        android:textColor="@color/colorText" android:textSize="20sp"
+                        android:backgroundTint="@color/colorAccent"/>
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnInfoAvgPeriod"
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Announcement interval (minutes)"
+                        android:textColor="@color/colorTextSecondary" android:textSize="12sp"/>
+                    <EditText android:id="@+id/etAvgInterval"
+                        android:layout_width="110dp" android:layout_height="wrap_content"
+                        android:inputType="number" android:maxLines="1"
+                        android:textColor="@color/colorText" android:textSize="20sp"
+                        android:backgroundTint="@color/colorAccent"/>
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnInfoAvgInterval"
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <CheckBox android:id="@+id/cbAvg"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:buttonTint="@color/colorAccent"
+                android:text="@string/cb_announce_avg"
+                android:textColor="@color/colorText" android:textSize="15sp"/>
+        </LinearLayout>
+
+        <!-- ═══ OTHER ═══ -->
+        <TextView style="@style/SectionHeader" android:text="OTHER"/>
+
+        <LinearLayout style="@style/Card" android:orientation="vertical">
+
+            <CheckBox android:id="@+id/cbDistance"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:buttonTint="@color/colorAccent"
+                android:text="@string/cb_announce_distance"
+                android:textColor="@color/colorText" android:textSize="15sp"/>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="EMA smoothing factor \u03b1 (0.05\u20131.0)"
+                        android:textColor="@color/colorTextSecondary" android:textSize="12sp"/>
+                    <EditText android:id="@+id/etAlpha"
+                        android:layout_width="110dp" android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" android:maxLines="1"
+                        android:textColor="@color/colorText" android:textSize="20sp"
+                        android:backgroundTint="@color/colorAccent"/>
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnInfoAlpha"
+                    android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Hint -->
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:gravity="center"
+            android:text="@string/hint_volume_keys"
+            android:textColor="@color/colorTextSecondary" android:textSize="13sp"/>
+
+        <!-- Save button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSave"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:layout_marginTop="20dp" android:layout_marginBottom="16dp"
+            android:text="@string/btn_save" android:textSize="16sp"
+            app:backgroundTint="@color/colorAccent" app:cornerRadius="12dp"/>
+
+    </LinearLayout>
+</ScrollView>

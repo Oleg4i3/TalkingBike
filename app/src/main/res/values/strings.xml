@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VeloSpeedometer</string>
+    <string name="title_settings">Settings</string>
+
+    <string name="btn_start">START</string>
+    <string name="btn_stop">STOP</string>
+    <string name="btn_save">Save</string>
+
+    <string name="cb_announce_speed">Announce speed changes</string>
+    <string name="cb_announce_avg">Announce average speed</string>
+    <string name="cb_announce_distance">Announce distance</string>
+
+    <string name="hint_volume_keys">Vol ↓ double-press — announce now\nVol ↑ double-press — start / stop\n(works when app is on screen)</string>
+
+    <string name="cd_settings">Settings</string>
+</resources>
