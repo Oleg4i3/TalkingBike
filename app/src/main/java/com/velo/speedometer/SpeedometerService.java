@@ -152,24 +152,32 @@ public class SpeedometerService extends Service {
     }
 
     // ── Torch listener ────────────────────────────────────────────────────────
-    private void registerTorchListener() {
-        cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
-        torchCallback = new CameraManager.TorchCallback() {
-            @Override
-            public void onTorchModeChanged(@NonNull String cameraId, boolean enabled) {
-                if (!enabled || !tracking) return;
-                // Torch turned on → announce, then immediately turn it off
-                announceNow(true);
-                try {
-                    cameraManager.setTorchMode(cameraId, false);
-                } catch (CameraAccessException e) {
-                    Log.w(TAG, "Could not extinguish torch: " + e.getMessage());
-                }
-            }
-        };
-        cameraManager.registerTorchCallback(torchCallback, handler);
-    }
+   private long lastTorchActionMs = 0;
+private static final long TORCH_DEBOUNCE_MS = 1000;
 
+private void registerTorchListener() {
+    cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
+    torchCallback = new CameraManager.TorchCallback() {
+        @Override
+        public void onTorchModeChanged(@NonNull String cameraId, boolean enabled) {
+            if (!enabled || !tracking) return;
+            long now = System.currentTimeMillis();
+            if (now - lastTorchActionMs < TORCH_DEBOUNCE_MS) return;
+            lastTorchActionMs = now;
+            announceNow(true);
+            try {
+                cameraManager.setTorchMode(cameraId, false);
+            } catch (CameraAccessException e) {
+                Log.w(TAG, "Could not extinguish torch: " + e.getMessage());
+            }
+        }
+    };
+    // Задержка чтобы не поймать initial state при регистрации
+    handler.postDelayed(
+        () -> cameraManager.registerTorchCallback(torchCallback, handler),
+        500
+    );
+}
     private void unregisterTorchListener() {
         if (cameraManager != null && torchCallback != null) {
             cameraManager.unregisterTorchCallback(torchCallback);
