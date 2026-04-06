@@ -100,8 +100,9 @@ public class SpeedometerService extends Service {
     private int     screenAnnounceDebounceSec;
     private boolean enhancedAudioEnabled;
     private float   gainDb;
+    private boolean excludePausesFromAvg;
     private boolean doAnnounceCadence;
-    private float   lastCadenceRpm = 0f;
+    private CadenceDetector.Result lastCadenceResult = CadenceDetector.Result.EMPTY;
     private CadenceDetector cadenceDetector;
 
     @Override
@@ -109,7 +110,7 @@ public class SpeedometerService extends Service {
         super.onCreate();
         handler    = new Handler(Looper.getMainLooper());
         calculator = new SpeedCalculator(0.3f);
-        cadenceDetector = new CadenceDetector(this, rpm -> lastCadenceRpm = rpm);
+        cadenceDetector = new CadenceDetector(this, result -> lastCadenceResult = result);
         createNotificationChannel();
         initTts();
     }
@@ -182,23 +183,25 @@ public class SpeedometerService extends Service {
 
     public void togglePause() {
         if (state == TrackState.RUNNING) {
-            autoPaused = false;   // ручная пауза
+            autoPaused = false;
             state = TrackState.PAUSED;
+            calculator.setAccumulating(false);
             notifyStateChanged();
             if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
             updateNotification(calculator.getSmoothedSpeed(),
-                    calculator.getAverageSpeed(avgPeriodMin),
+                    calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg),
                     calculator.getTotalDistanceKm());
             speak(str("Paused", "Паузу", "Пауза"));
         } else if (state == TrackState.PAUSED) {
-            autoPaused = false;   // снятие паузы (ручное или авто)
+            autoPaused = false;
             state = TrackState.RUNNING;
+            calculator.setAccumulating(true);
             slowStartMs = -1;
             notifyStateChanged();
             lastAnyAnnounceMs = System.currentTimeMillis();
             if (doAnnounceAvg) scheduleAvgTimer();
             updateNotification(calculator.getSmoothedSpeed(),
-                    calculator.getAverageSpeed(avgPeriodMin),
+                    calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg),
                     calculator.getTotalDistanceKm());
             speak(str("Resumed", "Знову їдемо", "Продолжаем"));
         }
@@ -210,7 +213,7 @@ public class SpeedometerService extends Service {
         if (lastAnyAnnounceMs > 0 && (now - lastAnyAnnounceMs) < 2000L) return;
 
         float speed = calculator.getSmoothedSpeed();
-        float avg   = calculator.getAverageSpeed(avgPeriodMin);
+        float avg   = calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg);
         float dist  = calculator.getTotalDistanceKm();
 
         StringBuilder sb = new StringBuilder();
@@ -249,7 +252,7 @@ public class SpeedometerService extends Service {
 
             long  now   = System.currentTimeMillis();
             float speed = calculator.update(location.getSpeed(), now);
-            float avg   = calculator.getAverageSpeed(avgPeriodMin);
+            float avg   = calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg);
             float dist  = calculator.getTotalDistanceKm();
 
             if (listener != null) listener.onSpeedUpdate(speed, avg, dist);
@@ -314,7 +317,7 @@ public class SpeedometerService extends Service {
         avgRunnable = () -> {
             if (state == TrackState.RUNNING) {
                 float speed = calculator.getSmoothedSpeed();
-                float avg   = calculator.getAverageSpeed(avgPeriodMin);
+                float avg   = calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg);
                 float dist  = calculator.getTotalDistanceKm();
                 long  now   = System.currentTimeMillis();
 
@@ -474,8 +477,18 @@ public class SpeedometerService extends Service {
 
     private String fmtSpeedWithCadence(float kmh) {
         String s = fmtSpeed(kmh);
-        if (doAnnounceCadence && lastCadenceRpm > 0f)
-            s += ". " + str("Cadence ", "Каденс ", "Каданс ") + Math.round(lastCadenceRpm);
+        if (!doAnnounceCadence) return s;
+        CadenceDetector.Result r = lastCadenceResult;
+        if (r.stable && r.rpm > 0f) {
+            s += ". " + str("Cadence ", "Каденс ", "Каданс ") + Math.round(r.rpm);
+        } else if (r.stableAvgRpm > 0f) {
+            // Unstable right now but have recent history — announce average
+            s += ". " + str("Cadence approx ", "Каденс приблизно ", "Каданс примерно ")
+                 + Math.round(r.stableAvgRpm);
+        } else if (r.rpm > 0f) {
+            // Detected something but not confident
+            s += ". " + str("Cadence unstable", "Каденс нестабільний", "Каданс нестабильный");
+        }
         return s;
     }
 
@@ -559,10 +572,11 @@ public class SpeedometerService extends Service {
             "Долго стоите. Авто-пауза."));
         autoPaused = true;
         state = TrackState.PAUSED;
+        calculator.setAccumulating(false);
         notifyStateChanged();
         if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
         updateNotification(calculator.getSmoothedSpeed(),
-                calculator.getAverageSpeed(avgPeriodMin),
+                calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg),
                 calculator.getTotalDistanceKm());
     }
 
@@ -602,7 +616,8 @@ public class SpeedometerService extends Service {
         enhancedAudioEnabled     = p.getBoolean("enhanced_audio",    true);
         gainDb                   = p.getFloat("gain_db",             12f);
         calculator.setAlpha(p.getFloat("ema_alpha", 0.3f));
-        doAnnounceCadence        = p.getBoolean("announce_cadence", false);
+        doAnnounceCadence        = p.getBoolean("announce_cadence",       false);
+        excludePausesFromAvg     = p.getBoolean("exclude_pauses_from_avg", false);
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }
 

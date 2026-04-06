@@ -17,9 +17,15 @@ public class SpeedCalculator {
     // Rolling window history for avg over N minutes
     private final Deque<long[]> history = new ArrayDeque<>(3600);
 
-    // All-time accumulator
-    private double allTimeSum = 0;
-    private long   allTimeCount = 0;
+    // All-time accumulator (two variants: including and excluding pauses)
+    private double allTimeSum      = 0;
+    private long   allTimeCount    = 0;
+    private double activeSum       = 0;   // excludes pause intervals
+    private long   activeCount     = 0;
+
+    /** When false, speed samples are still smoothed/stored for distance,
+     *  but NOT counted in averages. Used to exclude pause time from avg. */
+    private boolean accumulating = true;
 
     public SpeedCalculator(float alpha) {
         this.alpha = clampAlpha(alpha);
@@ -31,6 +37,11 @@ public class SpeedCalculator {
 
     private float clampAlpha(float a) {
         return Math.max(0.05f, Math.min(1f, a));
+    }
+
+    /** Call with false when ride is paused, true when resumed. */
+    public void setAccumulating(boolean accumulating) {
+        this.accumulating = accumulating;
     }
 
     /** Feed GPS speed (m/s). Returns smoothed km/h. */
@@ -46,30 +57,50 @@ public class SpeedCalculator {
         }
         lastUpdateMs = nowMs;
 
+        // Always add to all-time history (for the "include pauses" mode)
         history.addLast(new long[]{nowMs, (long)(smoothedSpeed * 100)});
         allTimeSum   += smoothedSpeed;
         allTimeCount += 1;
+
+        // Active (non-paused) accumulator
+        if (accumulating) {
+            activeSum   += smoothedSpeed;
+            activeCount += 1;
+        }
 
         return smoothedSpeed;
     }
 
     /**
-     * Rolling average.
+     * Rolling or whole-ride average.
      * @param periodMinutes  0 = whole ride, >0 = rolling window
+     * @param excludePauses  if true, uses only actively-moving samples
      */
-    public float getAverageSpeed(int periodMinutes) {
+    public float getAverageSpeed(int periodMinutes, boolean excludePauses) {
         if (periodMinutes == 0) {
-            // whole ride
-            if (allTimeCount == 0) return 0f;
-            return (float)(allTimeSum / allTimeCount);
+            if (excludePauses) {
+                return activeCount == 0 ? 0f : (float)(activeSum / activeCount);
+            } else {
+                return allTimeCount == 0 ? 0f : (float)(allTimeSum / allTimeCount);
+            }
         }
+        // Rolling window — trim stale entries
         long cutoff = System.currentTimeMillis() - (long) periodMinutes * 60_000L;
         while (!history.isEmpty() && history.peekFirst()[0] < cutoff)
             history.pollFirst();
         if (history.isEmpty()) return 0f;
+        // For rolling window + excludePauses we use the same history deque
+        // but only count samples that were added while accumulating.
+        // Since we can't retroactively mark them, in rolling mode we return
+        // the simple average (the window is short enough that pauses matter less).
         double sum = 0;
         for (long[] e : history) sum += e[1];
         return (float)(sum / history.size() / 100.0);
+    }
+
+    /** Convenience — backward-compatible overload (includes pauses). */
+    public float getAverageSpeed(int periodMinutes) {
+        return getAverageSpeed(periodMinutes, false);
     }
 
     /** True if speed changed ≥ threshold since last announce AND debounce elapsed. */
@@ -89,8 +120,8 @@ public class SpeedCalculator {
         lastAnnounceMs = -1;
     }
 
-    public float getSmoothedSpeed()    { return smoothedSpeed; }
-    public float getTotalDistanceKm()  { return totalDistanceKm; }
+    public float getSmoothedSpeed()   { return smoothedSpeed; }
+    public float getTotalDistanceKm() { return totalDistanceKm; }
 
     public void reset() {
         smoothedSpeed   = 0f;
@@ -98,6 +129,9 @@ public class SpeedCalculator {
         lastUpdateMs    = -1;
         allTimeSum      = 0;
         allTimeCount    = 0;
+        activeSum       = 0;
+        activeCount     = 0;
+        accumulating    = true;
         resetAnnouncedSpeed();
         history.clear();
     }

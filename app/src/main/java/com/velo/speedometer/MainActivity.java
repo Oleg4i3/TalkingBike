@@ -30,7 +30,7 @@ public class MainActivity extends AppCompatActivity
     private static final int PERM       = 100;
     private static final int PERM_NOTIF = 101;
 
-    private TextView       tvSpeed, tvStats, tvPauseLabel;
+    private TextView       tvSpeed, tvStats, tvPauseLabel, tvCadence;
     private MaterialButton btnStart, btnPause, btnStop;
     private LinearLayout   llRunning;
 
@@ -39,6 +39,14 @@ public class MainActivity extends AppCompatActivity
 
     private long lastVolDown = 0, lastVolUp = 0;
     private static final long DBL = 500;
+
+    private final android.os.Handler cadenceHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable cadenceRunnable = new Runnable() {
+        @Override public void run() {
+            updateCadenceDisplay();
+            cadenceHandler.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,6 +57,7 @@ public class MainActivity extends AppCompatActivity
         tvSpeed      = findViewById(R.id.tvSpeed);
         tvStats      = findViewById(R.id.tvStats);
         tvPauseLabel = findViewById(R.id.tvPauseLabel);
+        tvCadence    = findViewById(R.id.tvCadence);
         btnStart     = findViewById(R.id.btnStart);
         btnPause     = findViewById(R.id.btnPause);
         btnStop      = findViewById(R.id.btnStop);
@@ -60,7 +69,6 @@ public class MainActivity extends AppCompatActivity
 
         findViewById(R.id.btnSettings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
-
         findViewById(R.id.btnCadenceGraph).setOnClickListener(v ->
                 startActivity(new Intent(this, CadenceGraphActivity.class)));
 
@@ -70,10 +78,12 @@ public class MainActivity extends AppCompatActivity
     @Override protected void onResume() {
         super.onResume();
         if (!bound && hasPermission()) bindService();
+        cadenceHandler.post(cadenceRunnable);
     }
 
     @Override protected void onPause() {
         super.onPause();
+        cadenceHandler.removeCallbacks(cadenceRunnable);
         if (bound) {
             service.setSpeedListener(null);
             unbindService(conn);
@@ -104,6 +114,26 @@ public class MainActivity extends AppCompatActivity
             tvStats.setText(String.format(Locale.US,
                     "Avg  %.0f km/h     %.2f km", avgKmh, distKm));
         });
+    }
+
+    private void updateCadenceDisplay() {
+        if (!bound || service == null) return;
+        CadenceDetector detector = service.getCadenceDetector();
+        if (detector == null) { tvCadence.setText(""); return; }
+        CadenceDetector.Result r = detector.getLastResult();
+        if (r == null || (r.rpm == 0 && r.stableAvgRpm == 0)) {
+            tvCadence.setText("");
+            return;
+        }
+        if (r.stable && r.rpm > 0) {
+            tvCadence.setText(Math.round(r.rpm) + " rpm");
+        } else if (r.stableAvgRpm > 0) {
+            tvCadence.setText("~" + Math.round(r.stableAvgRpm) + " rpm");
+        } else if (r.rpm > 0) {
+            tvCadence.setText("? rpm");
+        } else {
+            tvCadence.setText("");
+        }
     }
 
     @Override

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -18,6 +19,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
 
@@ -111,9 +113,10 @@ public class CadenceGraphActivity extends AppCompatActivity {
         startService(i);
         bindService(i, conn, Context.BIND_AUTO_CREATE);
 
-        // Listen for ride-stopped broadcast
+        // Android 14+ requires explicit exported flag for non-system receivers
         IntentFilter f = new IntentFilter(SpeedometerService.ACTION_RIDE_STOPPED);
-        registerReceiver(stoppedReceiver, f);
+        ContextCompat.registerReceiver(this, stoppedReceiver, f,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Start refresh loop
         handler.post(refreshRunnable);
@@ -136,13 +139,29 @@ public class CadenceGraphActivity extends AppCompatActivity {
     // ── Chart refresh ─────────────────────────────────────────────────────────
 
     private void refreshChart() {
-        if (detector == null) return;
+        if (!bound || service == null) return;
+        detector = service.getCadenceDetector();
+        if (detector == null) {
+            tvRpm.setText(getString(R.string.cadence_no_signal));
+            tvSamples.setText("0:00  (0 samples)");
+            return;
+        }
+        if (detector.getRawSamples() != chart.getDataSource())
+            chart.setData(detector.getRawSamples());
 
-        // Update cadence label
-        float rpm = detector.getLastRpm();
-        tvRpm.setText(rpm > 0
-                ? Math.round(rpm) + " RPM"
-                : getString(R.string.cadence_no_signal));
+        // Update cadence label using the full Result
+        CadenceDetector.Result r = detector.getLastResult();
+        if (r == null || r == CadenceDetector.Result.EMPTY) {
+            tvRpm.setText(getString(R.string.cadence_no_signal));
+        } else if (r.stable && r.rpm > 0) {
+            tvRpm.setText(Math.round(r.rpm) + " RPM");
+        } else if (r.stableAvgRpm > 0) {
+            tvRpm.setText("~" + Math.round(r.stableAvgRpm) + " RPM");
+        } else if (r.rpm > 0) {
+            tvRpm.setText("? RPM");
+        } else {
+            tvRpm.setText(getString(R.string.cadence_no_signal));
+        }
 
         // Update sample count label
         int count;

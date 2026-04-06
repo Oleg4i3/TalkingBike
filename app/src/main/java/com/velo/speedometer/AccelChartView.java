@@ -155,6 +155,9 @@ public class AccelChartView extends View {
         this.data = samples;
     }
 
+    /** Returns the currently connected data list, or null. */
+    public List<float[]> getDataSource() { return data; }
+
     /**
      * Call periodically (e.g. every 100 ms) to refresh the chart with latest data.
      * This method is fast — it only reads the last element to get total duration,

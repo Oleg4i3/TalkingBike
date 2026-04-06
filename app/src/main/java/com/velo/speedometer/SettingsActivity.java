@@ -30,7 +30,7 @@ public class SettingsActivity extends AppCompatActivity {
     private CheckBox cbSpeed, cbAvg, cbDistance;
     private CheckBox cbAutoPause, cbWalkingSpeed;
     private CheckBox cbScreenAnnounce, cbEnhancedAudio;
-    private CheckBox cbCadence;
+    private CheckBox cbCadence, cbExcludePauses;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,6 +78,7 @@ public class SettingsActivity extends AppCompatActivity {
         cbScreenAnnounce= findViewById(R.id.cbScreenAnnounce);
         cbEnhancedAudio = findViewById(R.id.cbEnhancedAudio);
         cbCadence       = findViewById(R.id.cbCadence);
+        cbExcludePauses = findViewById(R.id.cbExcludePauses);
     }
 
     private void loadValues() {
@@ -99,7 +100,8 @@ public class SettingsActivity extends AppCompatActivity {
         cbWalkingSpeed  .setChecked(p.getBoolean("walking_speed",     false));
         cbScreenAnnounce.setChecked(p.getBoolean("screen_announce",   true));
         cbEnhancedAudio .setChecked(p.getBoolean("enhanced_audio",    true));
-        cbCadence       .setChecked(p.getBoolean("announce_cadence",  false));
+        cbCadence       .setChecked(p.getBoolean("announce_cadence",       false));
+        cbExcludePauses .setChecked(p.getBoolean("exclude_pauses_from_avg", false));
 
         updateAllLabels();
     }
@@ -146,7 +148,8 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("walking_speed",     cbWalkingSpeed .isChecked())
                 .putBoolean("screen_announce",   cbScreenAnnounce.isChecked())
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
-                .putBoolean("announce_cadence",  cbCadence      .isChecked())
+                .putBoolean("announce_cadence",       cbCadence      .isChecked())
+                .putBoolean("exclude_pauses_from_avg", cbExcludePauses.isChecked())
                 .apply();
         // Применяем настройки немедленно, если сервис уже запущен
         startService(new Intent(this, SpeedometerService.class)
@@ -189,6 +192,8 @@ public class SettingsActivity extends AppCompatActivity {
                 "Controls GPS speed smoothing:\n\n• 0.1 — very smooth, slow to react\n• 0.3 — good balance for cycling\n• 0.8 — fast reaction, noisier\n\nFormula: speed = α × gps + (1−α) × previous");
         info(R.id.btnInfoCadence,     "Announce cadence",
                 "Reads the phone accelerometer to estimate pedalling cadence (RPM) without any external sensor.\n\nKeep the phone in a trouser pocket or bag attached to your body (not to the frame).\n\nCadence is spoken right after speed: \"Speed 28. Cadence 85\".\n\nReads 0 RPM when coasting — nothing is announced then.");
+        info(R.id.btnInfoExcludePauses, "Exclude pauses from average",
+                "When enabled, average speed is calculated only from time spent actively riding — manual pauses and auto-pauses are excluded from both the rolling window and the whole-ride average.\n\nUseful for comparing effort across rides with different pause patterns.");
     }
 
     private void info(int id, String title, String msg) {
