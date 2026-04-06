@@ -139,6 +139,20 @@
                 android:layout_height="wrap_content" android:buttonTint="@color/colorAccent"
                 android:text="@string/cb_announce_distance"
                 android:textColor="@color/colorText" android:textSize="15sp"/>
+            <View style="@style/Divider"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <CheckBox android:id="@+id/cbExcludePauses" android:layout_width="0dp"
+                    android:layout_height="wrap_content" android:layout_weight="1"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="@string/cb_exclude_pauses"
+                    android:textColor="@color/colorText" android:textSize="15sp"/>
+                <ImageButton android:id="@+id/btnInfoExcludePauses" android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary"
+                    android:contentDescription="Info"/>
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ═══ AUTO-PAUSE ═══ -->
