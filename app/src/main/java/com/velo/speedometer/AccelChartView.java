@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.GestureDetector;
@@ -17,69 +18,83 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Scrollable + pinch-zoomable chart of raw accelerometer magnitude
- * with an overlaid cadence trace.
+ * Two-panel chart in one View:
+ *   TOP 65%  — raw |accel| (m/s²) + cadence overlay (RPM)
+ *   BOTTOM 35% — GPS speed (km/h)
  *
- * Y-left axis  : |accel| in m/s²  (cyan line)
- * Y-right axis : cadence in RPM   (thick yellow = stable, thick dashed = uncertain)
+ * Both panels share the same X (time) axis, scroll and zoom together.
  *
- * Touch gestures:
- *   Horizontal drag / fling — scroll in time
- *   Pinch / spread          — zoom window width (1 s … 120 s)
+ * Touch:
+ *   Horizontal drag / fling  — scroll in time
+ *   Pinch / spread           — zoom (1 s … 120 s)
  */
 public class AccelChartView extends View {
 
-    // ── Layout ────────────────────────────────────────────────────────────────
-    private static final float WIN_MIN_SEC  = 1f;
-    private static final float WIN_MAX_SEC  = 120f;
-    private static final float WIN_DEF_SEC  = 10f;
-    private static final float GRID_STEP    = 1f;   // seconds between vertical grid lines
-    private static final float GRAVITY      = 9.81f;
+    // ── Window ────────────────────────────────────────────────────────────────
+    private static final float WIN_MIN_SEC = 1f;
+    private static final float WIN_MAX_SEC = 120f;
+    private static final float WIN_DEF_SEC = 10f;
+    private static final float GRAVITY     = 9.81f;
 
-    // Cadence Y-axis range shown on the right
-    private static final float RPM_MIN_DISPLAY = 40f;
-    private static final float RPM_MAX_DISPLAY = 150f;
+    // Cadence Y range (right axis of top panel)
+    private static final float RPM_LO = 40f;
+    private static final float RPM_HI = 150f;
 
-    // Right-side margin reserved for RPM axis labels
-    private static final float RIGHT_PAD_DP = 36f;
+    // Panel split
+    private static final float ACCEL_FRAC = 0.65f;  // top panel fraction of total height
+    private static final float DIV_H_DP   = 1.5f;
+    private static final float RIGHT_DP   = 38f;     // right margin for cadence axis labels
 
     // ── Data ──────────────────────────────────────────────────────────────────
-    private List<float[]> accelData   = null;  // [elapsed_sec, magnitude_ms2]
-    private List<float[]> cadenceData = null;  // [elapsed_sec, rpm, stable(1/0)]
+    private List<float[]> accelData   = null; // [elapsed_sec, mag_ms2]
+    private List<float[]> cadenceData = null; // [elapsed_sec, rpm, stable(1/0)]
+    private List<float[]> speedData   = null; // [elapsed_sec, speedKmh]
 
+    // ── Scroll / zoom state ───────────────────────────────────────────────────
     private float totalSec   = 0f;
     private float viewEndSec = WIN_DEF_SEC;
-    private float windowSec  = WIN_DEF_SEC;  // current zoom level
+    private float windowSec  = WIN_DEF_SEC;
     private boolean autoScroll = true;
 
-    // ── Y-range for accel (auto-ranging with lerp) ────────────────────────────
-    private float yLo = 7f, yHi = 13f;
+    // Accel Y range (lerp-smoothed)
+    private float aLo = 7f, aHi = 13f;
+    // Speed Y range (lerp-smoothed)
+    private float sLo = 0f, sHi = 40f;
 
     // ── Paints ────────────────────────────────────────────────────────────────
-    private final Paint bgPaint        = new Paint();
-    private final Paint gridPaint      = new Paint();
-    private final Paint gravPaint      = new Paint();
-    private final Paint accelPaint     = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint cadenceStable  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint cadenceUncert  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint labelPaint     = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint labelRpmPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint livePaint      = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBg         = new Paint();
+    private final Paint pDiv        = new Paint();
+    private final Paint pGrid       = new Paint();
+    private final Paint pGrav       = new Paint();
+    private final Paint pAccel      = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pCadStable  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pCadUncert  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSpeed      = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSpeedFill  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pLabelL     = new Paint(Paint.ANTI_ALIAS_FLAG); // accel axis
+    private final Paint pLabelR     = new Paint(Paint.ANTI_ALIAS_FLAG); // cadence axis
+    private final Paint pLabelS     = new Paint(Paint.ANTI_ALIAS_FLAG); // speed axis
+    private final Paint pLive       = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final Path accelPath   = new Path();
-    private final Path stablePath  = new Path();
-    private final Path uncertPath  = new Path();
+    private final Path pathAccel     = new Path();
+    private final Path pathCadStable = new Path();
+    private final Path pathCadUncert = new Path();
+    private final Path pathSpeed     = new Path();
+    private final Path pathSpeedFill = new Path();
 
-    // ── Gesture ───────────────────────────────────────────────────────────────
-    private final GestureDetector      gestureDetector;
-    private final ScaleGestureDetector scaleDetector;
+    // ── Gestures ──────────────────────────────────────────────────────────────
+    private final GestureDetector      gesture;
+    private final ScaleGestureDetector scale;
     private final OverScroller         scroller;
 
-    private final Runnable flingRunnable = new Runnable() {
+    private float rightPx;
+    private float divPx;
+
+    private final Runnable flingTick = new Runnable() {
         @Override public void run() {
             if (scroller.computeScrollOffset()) {
                 viewEndSec = scroller.getCurrX() / 1000f;
-                clampViewEnd();
+                clamp();
                 autoScroll = viewEndSec >= totalSec - 0.3f;
                 invalidate();
                 postOnAnimation(this);
@@ -87,181 +102,126 @@ public class AccelChartView extends View {
         }
     };
 
-    private float rightPadPx;
-
-    // ── Constructors ──────────────────────────────────────────────────────────
+    // ── Constructor ───────────────────────────────────────────────────────────
 
     public AccelChartView(Context ctx) { this(ctx, null); }
 
     public AccelChartView(Context ctx, AttributeSet attrs) {
         super(ctx, attrs);
+        rightPx = dp(ctx, RIGHT_DP);
+        divPx   = dp(ctx, DIV_H_DP);
 
-        rightPadPx = dp(ctx, RIGHT_PAD_DP);
+        pBg.setColor(0xFF111111); pBg.setStyle(Paint.Style.FILL);
+        pDiv.setColor(0xFF333333); pDiv.setStyle(Paint.Style.FILL);
+        pGrid.setColor(0xFF232323); pGrid.setStyle(Paint.Style.STROKE); pGrid.setStrokeWidth(1f);
 
-        // Background
-        bgPaint.setColor(0xFF111111);
-        bgPaint.setStyle(Paint.Style.FILL);
+        pGrav.setColor(0xFF2A4A2A); pGrav.setStyle(Paint.Style.STROKE); pGrav.setStrokeWidth(1.5f);
+        pGrav.setPathEffect(new DashPathEffect(new float[]{8, 6}, 0));
 
-        // Vertical grid
-        gridPaint.setColor(0xFF252525);
-        gridPaint.setStyle(Paint.Style.STROKE);
-        gridPaint.setStrokeWidth(1f);
+        pAccel.setColor(0xFF00E5CC); pAccel.setStyle(Paint.Style.STROKE);
+        pAccel.setStrokeWidth(1.8f); pAccel.setStrokeJoin(Paint.Join.ROUND);
 
-        // Gravity reference (horizontal dashed)
-        gravPaint.setColor(0xFF2E4A2E);
-        gravPaint.setStyle(Paint.Style.STROKE);
-        gravPaint.setStrokeWidth(1.5f);
-        gravPaint.setPathEffect(new DashPathEffect(new float[]{8, 6}, 0));
+        pCadStable.setColor(0xFFFFD600); pCadStable.setStyle(Paint.Style.STROKE);
+        pCadStable.setStrokeWidth(3.5f); pCadStable.setStrokeJoin(Paint.Join.ROUND);
+        pCadStable.setStrokeCap(Paint.Cap.ROUND);
 
-        // Accel signal
-        accelPaint.setColor(0xFF00E5CC);
-        accelPaint.setStyle(Paint.Style.STROKE);
-        accelPaint.setStrokeWidth(1.8f);
-        accelPaint.setStrokeCap(Paint.Cap.ROUND);
-        accelPaint.setStrokeJoin(Paint.Join.ROUND);
+        pCadUncert.setColor(0xFFFF8C00); pCadUncert.setStyle(Paint.Style.STROKE);
+        pCadUncert.setStrokeWidth(3f);
+        pCadUncert.setPathEffect(new DashPathEffect(new float[]{12, 8}, 0));
+        pCadUncert.setStrokeCap(Paint.Cap.ROUND);
 
-        // Cadence — stable: thick solid yellow
-        cadenceStable.setColor(0xFFFFD600);
-        cadenceStable.setStyle(Paint.Style.STROKE);
-        cadenceStable.setStrokeWidth(3.5f);
-        cadenceStable.setStrokeCap(Paint.Cap.ROUND);
-        cadenceStable.setStrokeJoin(Paint.Join.ROUND);
+        pSpeed.setColor(0xFF4CAF50); pSpeed.setStyle(Paint.Style.STROKE);
+        pSpeed.setStrokeWidth(2f); pSpeed.setStrokeJoin(Paint.Join.ROUND);
 
-        // Cadence — uncertain: thick dashed orange
-        cadenceUncert.setColor(0xFFFF8C00);
-        cadenceUncert.setStyle(Paint.Style.STROKE);
-        cadenceUncert.setStrokeWidth(3f);
-        cadenceUncert.setPathEffect(new DashPathEffect(new float[]{12, 8}, 0));
-        cadenceUncert.setStrokeCap(Paint.Cap.ROUND);
+        pSpeedFill.setColor(0x224CAF50); pSpeedFill.setStyle(Paint.Style.FILL);
 
-        // Left axis labels (accel)
-        labelPaint.setColor(0xFF555555);
-        labelPaint.setTextSize(sp(ctx, 10));
-
-        // Right axis labels (RPM)
-        labelRpmPaint.setColor(0xFFAA9900);
-        labelRpmPaint.setTextSize(sp(ctx, 10));
-
-        // LIVE indicator
-        livePaint.setColor(0xFFFF6B35);
-        livePaint.setTextSize(sp(ctx, 12));
-        livePaint.setFakeBoldText(true);
+        float sp10 = sp(ctx, 10), sp12 = sp(ctx, 12);
+        pLabelL.setColor(0xFF555555); pLabelL.setTextSize(sp10);
+        pLabelR.setColor(0xFFAA9900); pLabelR.setTextSize(sp10);
+        pLabelS.setColor(0xFF3A7A3A); pLabelS.setTextSize(sp10);
+        pLive.setColor(0xFFFF6B35);   pLive.setTextSize(sp12); pLive.setFakeBoldText(true);
 
         scroller = new OverScroller(ctx);
 
-        gestureDetector = new GestureDetector(ctx,
-                new GestureDetector.SimpleOnGestureListener() {
-                    @Override public boolean onDown(MotionEvent e) {
-                        scroller.abortAnimation();
-                        removeCallbacks(flingRunnable);
-                        return true;
-                    }
+        gesture = new GestureDetector(ctx, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) {
+                scroller.abortAnimation(); removeCallbacks(flingTick); return true;
+            }
+            @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
+                if (scale.isInProgress()) return false;
+                viewEndSec += dx * (windowSec / Math.max(getWidth() - rightPx, 1f));
+                clamp(); autoScroll = viewEndSec >= totalSec - 0.3f; invalidate(); return true;
+            }
+            @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
+                if (scale.isInProgress()) return false;
+                float spp = windowSec / Math.max(getWidth() - rightPx, 1f);
+                scroller.fling((int)(viewEndSec*1000), 0, (int)(-vx*spp*1000), 0,
+                        (int)(windowSec*1000), (int)((totalSec+1f)*1000), 0, 0);
+                postOnAnimation(flingTick); return true;
+            }
+        });
 
-                    @Override
-                    public boolean onScroll(MotionEvent e1, MotionEvent e2,
-                                            float dx, float dy) {
-                        if (scaleDetector.isInProgress()) return false;
-                        float secsPerPx = windowSec / Math.max(getWidth() - rightPadPx, 1f);
-                        viewEndSec += dx * secsPerPx;
-                        clampViewEnd();
-                        autoScroll = viewEndSec >= totalSec - 0.3f;
-                        invalidate();
-                        return true;
-                    }
-
-                    @Override
-                    public boolean onFling(MotionEvent e1, MotionEvent e2,
-                                           float vx, float vy) {
-                        if (scaleDetector.isInProgress()) return false;
-                        float secsPerPx = windowSec / Math.max(getWidth() - rightPadPx, 1f);
-                        scroller.fling(
-                                (int)(viewEndSec * 1000), 0,
-                                (int)(-vx * secsPerPx * 1000), 0,
-                                (int)(windowSec * 1000),
-                                (int)((totalSec + 1f) * 1000),
-                                0, 0);
-                        postOnAnimation(flingRunnable);
-                        return true;
-                    }
-                });
-
-        scaleDetector = new ScaleGestureDetector(ctx,
+        scale = new ScaleGestureDetector(ctx,
                 new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                    // Focus X in time coordinates at the moment scale begins
-                    private float focusSec = 0f;
-
-                    @Override
-                    public boolean onScaleBegin(ScaleGestureDetector d) {
-                        scroller.abortAnimation();
-                        removeCallbacks(flingRunnable);
-                        float chartW = Math.max(getWidth() - rightPadPx, 1f);
-                        float startSec = viewEndSec - windowSec;
-                        focusSec = startSec + (d.getFocusX() / chartW) * windowSec;
-                        return true;
-                    }
-
-                    @Override
-                    public boolean onScale(ScaleGestureDetector d) {
-                        float factor = d.getScaleFactor(); // >1 = spread = zoom in
-                        float newWindow = windowSec / factor;
-                        newWindow = Math.max(WIN_MIN_SEC, Math.min(WIN_MAX_SEC, newWindow));
-
-                        // Keep the focus point stationary on screen while zooming
-                        float chartW = Math.max(getWidth() - rightPadPx, 1f);
-                        // focusSec was at fraction fx of the old window
-                        float fx = (focusSec - (viewEndSec - windowSec)) / windowSec;
-                        // After zoom, viewEndSec is adjusted so focusSec stays at fx
-                        viewEndSec = focusSec + (1f - fx) * newWindow;
-                        windowSec  = newWindow;
-
-                        clampViewEnd();
-                        autoScroll = viewEndSec >= totalSec - 0.3f;
-                        invalidate();
-                        return true;
-                    }
-                });
+            private float focusSec;
+            @Override public boolean onScaleBegin(ScaleGestureDetector d) {
+                scroller.abortAnimation(); removeCallbacks(flingTick);
+                float chartW = Math.max(getWidth() - rightPx, 1f);
+                focusSec = (viewEndSec - windowSec) + (d.getFocusX() / chartW) * windowSec;
+                return true;
+            }
+            @Override public boolean onScale(ScaleGestureDetector d) {
+                float newWin = Math.max(WIN_MIN_SEC, Math.min(WIN_MAX_SEC, windowSec / d.getScaleFactor()));
+                float chartW = Math.max(getWidth() - rightPx, 1f);
+                float fx = (focusSec - (viewEndSec - windowSec)) / windowSec;
+                viewEndSec = focusSec + (1f - fx) * newWin;
+                windowSec  = newWin;
+                clamp(); autoScroll = viewEndSec >= totalSec - 0.3f; invalidate(); return true;
+            }
+        });
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    public void setData(List<float[]> accel) {
-        this.accelData = accel;
-    }
+    public void setData(List<float[]> accel)           { accelData   = accel; }
+    public void setCadenceData(List<float[]> cadence)  { cadenceData = cadence; }
+    public void setSpeedData(List<float[]> speed)      { speedData   = speed; }
+    public List<float[]> getDataSource()               { return accelData; }
 
-    public void setCadenceData(List<float[]> cadence) {
-        this.cadenceData = cadence;
-    }
-
-    public List<float[]> getDataSource() { return accelData; }
-
+    /** Call every ~100 ms to refresh. */
     public void tick() {
         if (accelData == null) return;
         float latest = 0f;
         synchronized (accelData) {
-            if (!accelData.isEmpty()) latest = accelData.get(accelData.size() - 1)[0];
+            if (!accelData.isEmpty()) latest = accelData.get(accelData.size()-1)[0];
+        }
+        // Also check speed data for latest time
+        if (speedData != null) {
+            synchronized (speedData) {
+                if (!speedData.isEmpty()) {
+                    float st = speedData.get(speedData.size()-1)[0];
+                    if (st > latest) latest = st;
+                }
+            }
         }
         totalSec = latest;
         if (autoScroll) viewEndSec = totalSec;
-        updateYRange();
+        updateYRanges();
         invalidate();
     }
 
     public void scrollToEnd() {
-        scroller.abortAnimation();
-        removeCallbacks(flingRunnable);
-        autoScroll = true;
-        viewEndSec = totalSec;
-        invalidate();
+        scroller.abortAnimation(); removeCallbacks(flingTick);
+        autoScroll = true; viewEndSec = totalSec; invalidate();
     }
 
     public boolean isAutoScroll() { return autoScroll; }
 
     // ── Touch ─────────────────────────────────────────────────────────────────
 
-    @Override
-    public boolean onTouchEvent(MotionEvent e) {
-        scaleDetector.onTouchEvent(e);
-        gestureDetector.onTouchEvent(e);
+    @Override public boolean onTouchEvent(MotionEvent e) {
+        scale.onTouchEvent(e);
+        gesture.onTouchEvent(e);
         return true;
     }
 
@@ -269,187 +229,252 @@ public class AccelChartView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        final int w  = getWidth();
-        final int h  = getHeight();
-        final float chartW = w - rightPadPx;  // drawable area excluding right RPM axis
-
-        canvas.drawRect(0, 0, w, h, bgPaint);
-        if (accelData == null || w == 0 || h == 0) return;
-
+        final int   W      = getWidth();
+        final int   H      = getHeight();
+        final float chartW = W - rightPx;
+        final int   accelH = (int)(H * ACCEL_FRAC);  // top panel height
+        final int   speedH = H - accelH - (int)divPx; // bottom panel height
         final float startSec = viewEndSec - windowSec;
-        final float yRange   = Math.max(yHi - yLo, 0.1f);
 
-        // ── Vertical time grid ────────────────────────────────────────────────
-        float gridStart = (float) Math.ceil(startSec / GRID_STEP) * GRID_STEP;
-        for (float t = gridStart; t <= viewEndSec; t += GRID_STEP) {
-            float x = tToX(t, startSec, chartW);
-            canvas.drawLine(x, 0, x, h, gridPaint);
-            int tInt = (int) t;
-            if (tInt % 2 == 0) {
-                String label = String.format(Locale.US, "%d:%02d", tInt / 60, tInt % 60);
-                canvas.drawText(label, x + 3, h - 6, labelPaint);
+        canvas.drawRect(0, 0, W, H, pBg);
+
+        // ── Shared vertical time grid ─────────────────────────────────────────
+        float step = gridStep();
+        float gs = (float) Math.ceil(startSec / step) * step;
+        for (float t = gs; t <= viewEndSec; t += step) {
+            float x = tX(t, startSec, chartW);
+            canvas.drawLine(x, 0, x, H, pGrid);
+            if (shouldLabel(t, step)) {
+                int ti = (int) t;
+                String lbl = String.format(Locale.US, "%d:%02d", ti/60, ti%60);
+                canvas.drawText(lbl, x+3, H-4, pLabelL);
             }
         }
 
-        // ── Gravity reference (horizontal dashed line on left Y axis) ─────────
-        float yGrav = magToY(GRAVITY, h, yLo, yRange);
-        if (yGrav >= 0 && yGrav <= h)
-            canvas.drawLine(0, yGrav, chartW, yGrav, gravPaint);
+        // ══ TOP PANEL: accel + cadence ════════════════════════════════════════
+        canvas.save();
+        canvas.clipRect(0, 0, W, accelH);
 
-        // ── Accel signal ──────────────────────────────────────────────────────
-        accelPath.reset();
+        float aRange = Math.max(aHi - aLo, 0.1f);
+
+        // Gravity reference
+        float yGrav = accelY(GRAVITY, accelH, aRange);
+        if (yGrav >= 0 && yGrav <= accelH)
+            canvas.drawLine(0, yGrav, chartW, yGrav, pGrav);
+
+        // Accel path
+        pathAccel.reset();
         boolean first = true;
-        int startIdx = findStartIndex(accelData, startSec - 0.1f);
-        synchronized (accelData) {
-            int size = accelData.size();
-            for (int i = startIdx; i < size; i++) {
+        int idx = bsearch(accelData, startSec - 0.1f);
+        if (accelData != null) synchronized (accelData) {
+            for (int i = idx; i < accelData.size(); i++) {
                 float[] s = accelData.get(i);
                 if (s[0] > viewEndSec + 0.1f) break;
-                float x = tToX(s[0], startSec, chartW);
-                float y = magToY(s[1], h, yLo, yRange);
-                if (first) { accelPath.moveTo(x, y); first = false; }
-                else        accelPath.lineTo(x, y);
+                float x = tX(s[0], startSec, chartW);
+                float y = accelY(s[1], accelH, aRange);
+                if (first) { pathAccel.moveTo(x, y); first = false; }
+                else          pathAccel.lineTo(x, y);
             }
         }
-        canvas.drawPath(accelPath, accelPaint);
+        canvas.drawPath(pathAccel, pAccel);
 
-        // ── Cadence overlay ───────────────────────────────────────────────────
+        // Cadence path — split into stable/uncertain segments
+        pathCadStable.reset(); pathCadUncert.reset();
+        boolean fs = true, fu = true;
         if (cadenceData != null) {
-            stablePath.reset();
-            uncertPath.reset();
-            boolean firstS = true, firstU = true;
-
-            int cStartIdx = findStartIndex(cadenceData, startSec - 2f);
+            int ci = bsearch(cadenceData, startSec - 2f);
             synchronized (cadenceData) {
-                int size = cadenceData.size();
-                for (int i = cStartIdx; i < size; i++) {
+                for (int i = ci; i < cadenceData.size(); i++) {
                     float[] c = cadenceData.get(i);
                     if (c[0] > viewEndSec + 2f) break;
-
-                    float x   = tToX(c[0], startSec, chartW);
-                    float rpm = c[1];
-                    float y   = rpmToY(rpm, h);
-                    boolean stable = c[2] > 0.5f;
-
-                    if (stable) {
-                        if (firstS) { stablePath.moveTo(x, y); firstS = false; }
-                        else         stablePath.lineTo(x, y);
-                        // Break uncertain path so it doesn't connect to stable
-                        firstU = true;
-                    } else {
-                        if (firstU) { uncertPath.moveTo(x, y); firstU = false; }
-                        else         uncertPath.lineTo(x, y);
-                        // Break stable path
-                        firstS = true;
+                    float x = tX(c[0], startSec, chartW);
+                    float y = cadenceY(c[1], accelH);
+                    if (c[2] > 0.5f) {           // stable
+                        if (fs) { pathCadStable.moveTo(x, y); fs = false; }
+                        else      pathCadStable.lineTo(x, y);
+                        fu = true;               // break uncertain path
+                    } else {                     // uncertain
+                        if (fu) { pathCadUncert.moveTo(x, y); fu = false; }
+                        else      pathCadUncert.lineTo(x, y);
+                        fs = true;               // break stable path
                     }
                 }
             }
-            canvas.drawPath(stablePath, cadenceStable);
-            canvas.drawPath(uncertPath, cadenceUncert);
         }
+        canvas.drawPath(pathCadStable, pCadStable);
+        canvas.drawPath(pathCadUncert, pCadUncert);
 
-        // ── Left Y-axis labels (m/s²) ─────────────────────────────────────────
-        float textH = labelPaint.getTextSize();
-        canvas.drawText(String.format(Locale.US, "%.1f", yHi), 3, textH + 2, labelPaint);
-        canvas.drawText(String.format(Locale.US, "%.1f", (yLo + yHi) / 2), 3, h / 2f, labelPaint);
-        canvas.drawText(String.format(Locale.US, "%.1f", yLo), 3, h - 4, labelPaint);
+        // Left axis: accel labels
+        canvas.drawText(fmt1(aHi),           4, pLabelL.getTextSize()+2, pLabelL);
+        canvas.drawText(fmt1((aLo+aHi)/2f),  4, accelH/2f,               pLabelL);
+        canvas.drawText(fmt1(aLo),           4, accelH-4,                 pLabelL);
 
-        // ── Right Y-axis labels (RPM) ─────────────────────────────────────────
-        float rTextH = labelRpmPaint.getTextSize();
-        String rTop  = Math.round(RPM_MAX_DISPLAY) + "";
-        String rMid  = Math.round((RPM_MIN_DISPLAY + RPM_MAX_DISPLAY) / 2) + "";
-        String rBot  = Math.round(RPM_MIN_DISPLAY) + "";
-        float lw = labelRpmPaint.measureText(rTop);
-        canvas.drawText(rTop, w - lw - 2, rTextH + 2,       labelRpmPaint);
-        canvas.drawText(rMid, w - labelRpmPaint.measureText(rMid) - 2, h / 2f, labelRpmPaint);
-        canvas.drawText(rBot, w - labelRpmPaint.measureText(rBot) - 2, h - 4,  labelRpmPaint);
+        // Right axis: cadence labels
+        canvas.drawText(Math.round(RPM_HI)+"", W-rightPx+2, pLabelR.getTextSize()+2, pLabelR);
+        canvas.drawText(Math.round((RPM_LO+RPM_HI)/2f)+"", W-rightPx+2, accelH/2f,   pLabelR);
+        canvas.drawText(Math.round(RPM_LO)+"", W-rightPx+2, accelH-4,                pLabelR);
 
-        // ── Zoom hint (when not at default zoom) ──────────────────────────────
-        if (Math.abs(windowSec - WIN_DEF_SEC) > 0.5f) {
-            String zoomStr = String.format(Locale.US, "%.0f s", windowSec);
-            canvas.drawText(zoomStr, chartW / 2 - labelPaint.measureText(zoomStr) / 2,
-                    rTextH + 2, labelPaint);
+        // Thin right-axis separator
+        canvas.drawLine(chartW, 0, chartW, accelH, pGrid);
+
+        canvas.restore();
+
+        // ── Divider bar ───────────────────────────────────────────────────────
+        canvas.drawRect(0, accelH, W, accelH + divPx, pDiv);
+
+        // ══ BOTTOM PANEL: speed ═══════════════════════════════════════════════
+        canvas.save();
+        canvas.translate(0, accelH + divPx);
+        canvas.clipRect(0, 0, W, speedH);
+
+        float sRange = Math.max(sHi - sLo, 1f);
+
+        // Speed fill + line
+        pathSpeed.reset(); pathSpeedFill.reset();
+        boolean sf = true;
+        if (speedData != null) {
+            int si = bsearch(speedData, startSec - 1f);
+            synchronized (speedData) {
+                for (int i = si; i < speedData.size(); i++) {
+                    float[] s = speedData.get(i);
+                    if (s[0] > viewEndSec + 1f) break;
+                    float x = tX(s[0], startSec, chartW);
+                    float y = speedY(s[1], speedH, sRange);
+                    if (sf) {
+                        pathSpeed.moveTo(x, y);
+                        pathSpeedFill.moveTo(x, speedH);
+                        pathSpeedFill.lineTo(x, y);
+                        sf = false;
+                    } else {
+                        pathSpeed.lineTo(x, y);
+                        pathSpeedFill.lineTo(x, y);
+                    }
+                }
+            }
+            if (!sf) {
+                // Close fill path to bottom
+                pathSpeedFill.lineTo(tX(viewEndSec, startSec, chartW), speedH);
+                pathSpeedFill.close();
+            }
         }
+        canvas.drawPath(pathSpeedFill, pSpeedFill);
+        canvas.drawPath(pathSpeed, pSpeed);
 
-        // ── LIVE indicator ────────────────────────────────────────────────────
+        // Speed axis labels
+        canvas.drawText(fmt0(sHi)+" km/h", 4, pLabelS.getTextSize()+2, pLabelS);
+        canvas.drawText(fmt0((sLo+sHi)/2f),  4, speedH/2f,               pLabelS);
+        canvas.drawText(fmt0(sLo),           4, speedH-4,                 pLabelS);
+
+        canvas.drawLine(chartW, 0, chartW, speedH, pGrid);
+
+        canvas.restore();
+
+        // ── LIVE + zoom hint (on top of everything) ───────────────────────────
+        float liveY = pLive.getTextSize() + 4;
         if (autoScroll) {
             String s = "● LIVE";
-            canvas.drawText(s, chartW - livePaint.measureText(s) - 4,
-                    livePaint.getTextSize() + 4, livePaint);
+            canvas.drawText(s, chartW - pLive.measureText(s) - 4, liveY, pLive);
+        }
+        if (Math.abs(windowSec - WIN_DEF_SEC) > 0.5f) {
+            String z = String.format(Locale.US, "%.0f s", windowSec);
+            canvas.drawText(z, chartW/2 - pLabelL.measureText(z)/2, liveY, pLabelL);
         }
     }
 
     // ── Coordinate helpers ────────────────────────────────────────────────────
 
-    /** Time → X pixel within [0, chartW]. */
-    private float tToX(float t, float startSec, float chartW) {
+    private float tX(float t, float startSec, float chartW) {
         return (t - startSec) / windowSec * chartW;
     }
 
-    /** Accel magnitude → Y pixel. */
-    private float magToY(float mag, int h, float yLo, float yRange) {
-        return h * (1f - (mag - yLo) / yRange);
+    private float accelY(float v, int panelH, float range) {
+        return panelH * (1f - (v - aLo) / range);
     }
 
-    /** RPM → Y pixel on the right axis. */
-    private float rpmToY(float rpm, int h) {
-        float frac = (rpm - RPM_MIN_DISPLAY) / (RPM_MAX_DISPLAY - RPM_MIN_DISPLAY);
-        return h * (1f - frac);
+    private float cadenceY(float rpm, int panelH) {
+        return panelH * (1f - (rpm - RPM_LO) / (RPM_HI - RPM_LO));
     }
 
-    private void clampViewEnd() {
+    private float speedY(float kmh, int panelH, float range) {
+        return panelH * (1f - (kmh - sLo) / range);
+    }
+
+    private void clamp() {
         float min = windowSec;
         float max = totalSec + 0.5f;
         if (viewEndSec < min) viewEndSec = min;
         if (viewEndSec > max) viewEndSec = max;
     }
 
-    /** Binary search: first index where data[i][0] >= targetSec. */
-    private int findStartIndex(List<float[]> list, float targetSec) {
+    /** Binary search: first index where list[i][0] >= targetSec. */
+    private int bsearch(List<float[]> list, float targetSec) {
         if (list == null) return 0;
         synchronized (list) {
-            int lo = 0, hi = list.size() - 1, result = list.size();
+            int lo = 0, hi = list.size()-1, res = list.size();
             while (lo <= hi) {
-                int mid = (lo + hi) >>> 1;
-                if (list.get(mid)[0] < targetSec) lo = mid + 1;
-                else { result = mid; hi = mid - 1; }
+                int mid = (lo+hi)>>>1;
+                if (list.get(mid)[0] < targetSec) lo = mid+1;
+                else { res = mid; hi = mid-1; }
             }
-            return result;
+            return res;
         }
     }
 
-    private void updateYRange() {
-        if (accelData == null) return;
-        float lo = Float.MAX_VALUE, hi = -Float.MAX_VALUE;
+    private void updateYRanges() {
         float startSec = viewEndSec - windowSec;
-        int idx = findStartIndex(accelData, startSec);
-        synchronized (accelData) {
-            int size = accelData.size();
-            for (int i = idx; i < size; i++) {
-                float[] s = accelData.get(i);
-                if (s[0] > viewEndSec) break;
-                if (s[1] < lo) lo = s[1];
-                if (s[1] > hi) hi = s[1];
+        // Accel range
+        if (accelData != null) {
+            float lo = Float.MAX_VALUE, hi = -Float.MAX_VALUE;
+            int idx = bsearch(accelData, startSec);
+            synchronized (accelData) {
+                for (int i = idx; i < accelData.size(); i++) {
+                    float[] s = accelData.get(i); if (s[0] > viewEndSec) break;
+                    if (s[1] < lo) lo = s[1]; if (s[1] > hi) hi = s[1];
+                }
+            }
+            if (lo < Float.MAX_VALUE) {
+                float pad = Math.max((hi-lo)*0.25f, 1f);
+                aLo = lerp(aLo, lo-pad, 0.15f); aHi = lerp(aHi, hi+pad, 0.15f);
             }
         }
-        if (lo == Float.MAX_VALUE) return;
-        float pad = Math.max((hi - lo) * 0.25f, 1f);
-        float newLo = lo - pad, newHi = hi + pad;
-        yLo = lerp(yLo, newLo, 0.15f);
-        yHi = lerp(yHi, newHi, 0.15f);
+        // Speed range
+        if (speedData != null) {
+            float hi = 5f;
+            int idx = bsearch(speedData, startSec);
+            synchronized (speedData) {
+                for (int i = idx; i < speedData.size(); i++) {
+                    float[] s = speedData.get(i); if (s[0] > viewEndSec) break;
+                    if (s[1] > hi) hi = s[1];
+                }
+            }
+            sHi = lerp(sHi, hi * 1.2f, 0.1f);
+        }
     }
+
+    // ── Grid helpers ──────────────────────────────────────────────────────────
+
+    /** Choose a grid step that keeps ~5–15 lines on screen. */
+    private float gridStep() {
+        float[] steps = {0.5f, 1f, 2f, 5f, 10f, 15f, 30f, 60f};
+        for (float s : steps) if (windowSec / s <= 15) return s;
+        return 60f;
+    }
+
+    private boolean shouldLabel(float t, float step) {
+        if (step < 1f) return Math.abs(t - Math.round(t)) < 0.01f;
+        return ((int)(t / step)) % 2 == 0;
+    }
+
+    // ── Formatters ────────────────────────────────────────────────────────────
+    private static String fmt1(float v) { return String.format(Locale.US, "%.1f", v); }
+    private static String fmt0(float v) { return String.format(Locale.US, "%.0f", v); }
 
     // ── Utils ─────────────────────────────────────────────────────────────────
-
-    private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
-
-    private static float sp(Context ctx, float sp) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp,
-                ctx.getResources().getDisplayMetrics());
+    private static float lerp(float a, float b, float t) { return a + (b-a)*t; }
+    private static float sp(Context c, float sp) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, c.getResources().getDisplayMetrics());
     }
-
-    private static float dp(Context ctx, float dp) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp,
-                ctx.getResources().getDisplayMetrics());
+    private static float dp(Context c, float dp) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, c.getResources().getDisplayMetrics());
     }
 }

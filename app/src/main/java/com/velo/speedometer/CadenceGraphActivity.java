@@ -52,13 +52,25 @@ public class CadenceGraphActivity extends AppCompatActivity {
             service  = ((SpeedometerService.LocalBinder) b).getService();
             detector = service.getCadenceDetector();
             bound    = true;
-            if (detector != null) chart.setData(detector.getRawSamples());
+            // Wire all datasets immediately — before first tick()
+            wireChartData();
         }
         @Override public void onServiceDisconnected(ComponentName n) {
             bound    = false;
             detector = null;
         }
     };
+
+    /** Connect chart to all live data sources. Safe to call repeatedly. */
+    private void wireChartData() {
+        if (detector != null) {
+            chart.setData(detector.getRawSamples());
+            chart.setCadenceData(detector.getCadenceHistory());
+        }
+        if (service != null) {
+            chart.setSpeedData(service.getSpeedHistory());
+        }
+    }
 
     // ── Refresh ───────────────────────────────────────────────────────────────
     private final Handler  handler = new Handler(Looper.getMainLooper());
@@ -146,10 +158,8 @@ public class CadenceGraphActivity extends AppCompatActivity {
             tvSamples.setText("0:00  (0 samples)");
             return;
         }
-        if (detector.getRawSamples() != chart.getDataSource()) {
-            chart.setData(detector.getRawSamples());
-            chart.setCadenceData(detector.getCadenceHistory());
-        }
+        // Always ensure chart is wired (handles ride restart mid-session)
+        wireChartData();
 
         // Update cadence label using the full Result
         CadenceDetector.Result r = detector.getLastResult();

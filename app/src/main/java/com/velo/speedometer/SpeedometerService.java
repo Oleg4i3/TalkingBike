@@ -76,7 +76,11 @@ public class SpeedometerService extends Service {
     private long            lastAnyAnnounceMs   = 0;
 
     private long slowStartMs = -1;
-    private boolean autoPaused = false;   // true = пауза поставлена автоматически
+    private boolean autoPaused = false;
+
+    // Speed history for graph: [elapsed_sec, speedKmh]
+    private final java.util.List<float[]> speedHistory = new java.util.ArrayList<>();
+    private long rideStartMs = -1;   // true = пауза поставлена автоматически
 
     private SpeedListener listener;
 
@@ -135,6 +139,8 @@ public class SpeedometerService extends Service {
     public TrackState getState() { return state; }
     public void setSpeedListener(SpeedListener l) { listener = l; }
     public CadenceDetector getCadenceDetector() { return cadenceDetector; }
+    /** Speed history since ride start — synchronize on the returned list to iterate. */
+    public java.util.List<float[]> getSpeedHistory() { return speedHistory; }
 
     public void startTracking() {
         if (state != TrackState.STOPPED) return;
@@ -144,6 +150,8 @@ public class SpeedometerService extends Service {
         lastAnyAnnounceMs   = 0;
         slowStartMs         = -1;
         autoPaused          = false;
+        rideStartMs         = System.currentTimeMillis();
+        synchronized (speedHistory) { speedHistory.clear(); }
         state = TrackState.RUNNING;
         notifyStateChanged();
 
@@ -254,6 +262,12 @@ public class SpeedometerService extends Service {
             float speed = calculator.update(location.getSpeed(), now);
             float avg   = calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg);
             float dist  = calculator.getTotalDistanceKm();
+
+            // Record speed history for graph
+            if (rideStartMs > 0) {
+                float elapsed = (now - rideStartMs) / 1000f;
+                synchronized (speedHistory) { speedHistory.add(new float[]{elapsed, speed}); }
+            }
 
             if (listener != null) listener.onSpeedUpdate(speed, avg, dist);
 
