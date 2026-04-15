@@ -65,10 +65,10 @@ public class CadenceDetector implements SensorEventListener {
     private static final int   SAMPLE_RATE      = 50;   // Hz (SENSOR_DELAY_GAME)
     private static final int   BUFFER_SIZE      = 512;  // ~10.24 s — power of 2
     private static final int   STEP_SIZE        = 50;   // recompute every ~1 s
-    private static final float RPM_MIN          = 50f;
-    private static final float RPM_MAX          = 140f;
+    private static final float RPM_MIN          = 45f;
+    private static final float RPM_MAX          = 100f;
 
-    /** Minimum SNR to consider any peak at all. */
+    /** Minimum SNR to consider any hpeak at all. */
     private static final float SNR_DETECT       = 4f;
     /** SNR required for the SNR criterion alone to "pass". */
     private static final float SNR_STABLE       = 12f;
