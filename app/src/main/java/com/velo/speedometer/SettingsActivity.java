@@ -31,6 +31,7 @@ public class SettingsActivity extends AppCompatActivity {
     private CheckBox cbAutoPause, cbWalkingSpeed;
     private CheckBox cbScreenAnnounce, cbEnhancedAudio;
     private CheckBox cbCadence, cbExcludePauses;
+    private CheckBox cbCadenceGyro, cbCadenceAcf;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -77,7 +78,9 @@ public class SettingsActivity extends AppCompatActivity {
         cbWalkingSpeed  = findViewById(R.id.cbWalkingSpeed);
         cbScreenAnnounce= findViewById(R.id.cbScreenAnnounce);
         cbEnhancedAudio = findViewById(R.id.cbEnhancedAudio);
-        cbCadence       = findViewById(R.id.cbCadence);
+        cbCadence    = findViewById(R.id.cbCadence);
+        cbCadenceGyro = findViewById(R.id.cbCadenceGyro);
+        cbCadenceAcf  = findViewById(R.id.cbCadenceAcf);
         cbExcludePauses = findViewById(R.id.cbExcludePauses);
     }
 
@@ -100,7 +103,9 @@ public class SettingsActivity extends AppCompatActivity {
         cbWalkingSpeed  .setChecked(p.getBoolean("walking_speed",     false));
         cbScreenAnnounce.setChecked(p.getBoolean("screen_announce",   true));
         cbEnhancedAudio .setChecked(p.getBoolean("enhanced_audio",    true));
-        cbCadence       .setChecked(p.getBoolean("announce_cadence",       false));
+        cbCadence    .setChecked(p.getBoolean("announce_cadence", false));
+        if (cbCadenceGyro != null) cbCadenceGyro.setChecked(!"accel".equals(p.getString("cadence_sensor","gyro")));
+        if (cbCadenceAcf  != null) cbCadenceAcf .setChecked(!"spectral".equals(p.getString("cadence_method","acf")));
         cbExcludePauses .setChecked(p.getBoolean("exclude_pauses_from_avg", false));
 
         updateAllLabels();
@@ -149,6 +154,8 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("screen_announce",   cbScreenAnnounce.isChecked())
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
+                .putString("cadence_sensor", (cbCadenceGyro != null && cbCadenceGyro.isChecked()) ? "gyro" : "accel")
+                .putString("cadence_method", (cbCadenceAcf  != null && cbCadenceAcf .isChecked()) ? "acf"  : "spectral")
                 .putBoolean("exclude_pauses_from_avg", cbExcludePauses.isChecked())
                 .apply();
         // Применяем настройки немедленно, если сервис уже запущен

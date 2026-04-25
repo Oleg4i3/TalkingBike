@@ -114,7 +114,7 @@ public class SpeedometerService extends Service {
         super.onCreate();
         handler    = new Handler(Looper.getMainLooper());
         calculator = new SpeedCalculator(0.3f);
-        cadenceDetector = new CadenceDetector(this, result -> lastCadenceResult = result);
+        cadenceDetector = createCadenceDetector();
         createNotificationChannel();
         initTts();
     }
@@ -420,6 +420,24 @@ public class SpeedometerService extends Service {
         }
     }
 
+    /**
+     * Factory — reads two settings:
+     *   "cadence_sensor"  : "gyro"  (default) | "accel"
+     *   "cadence_method"  : "acf"   (default) | "spectral"
+     *
+     * Gyro + ACF      → best for rough terrain (forest, gravel)
+     * Gyro + Spectral → comparison baseline
+     * Accel + ACF     → original sensor, correlation method
+     * Accel + Spectral→ original sensor, original method
+     */
+    private CadenceDetector createCadenceDetector() {
+        String sensor = prefs().getString("cadence_sensor", "gyro");
+        String method = prefs().getString("cadence_method", "acf");
+        boolean useGyro = "gyro".equals(sensor);
+        boolean useAcf  = !"spectral".equals(method);
+        return new CadenceDetector(this, result -> lastCadenceResult = result, useGyro, useAcf);
+    }
+
     private void initTts() {
         tts = new TextToSpeech(this, status -> {
             if (status != TextToSpeech.SUCCESS) return;
@@ -610,6 +628,11 @@ public class SpeedometerService extends Service {
             unregisterScreenReceiver();
             if (screenAnnounceEnabled) registerScreenReceiver();
         }
+        // Пересоздаём детектор если изменился сенсор или метод
+        boolean wasRunning = (state == TrackState.RUNNING);
+        cadenceDetector.stop();
+        cadenceDetector = createCadenceDetector();
+        if (wasRunning) cadenceDetector.start();
     }
 
     private void loadSettings() {
