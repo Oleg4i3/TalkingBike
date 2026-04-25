@@ -267,6 +267,24 @@
                     android:layout_height="36dp" android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_help" android:tint="@color/colorTextSecondary" android:contentDescription="Info"/>
             </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="4dp">
+                <CheckBox android:id="@+id/cbCadenceGyro"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Sensor: Gyroscope (off = Accelerometer)"
+                    android:textColor="@color/colorTextSecondary" android:textSize="13sp"
+                    android:checked="true"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:paddingBottom="4dp">
+                <CheckBox android:id="@+id/cbCadenceAcf"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Method: ACF (off = Spectral/FFT)"
+                    android:textColor="@color/colorTextSecondary" android:textSize="13sp"
+                    android:checked="true"/>
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ═══ ADVANCED ═══ -->
