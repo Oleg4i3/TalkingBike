@@ -431,8 +431,9 @@ public class SpeedometerService extends Service {
      * Accel + Spectral→ original sensor, original method
      */
     private CadenceDetector createCadenceDetector() {
-        String sensor = prefs().getString("cadence_sensor", "gyro");
-        String method = prefs().getString("cadence_method", "acf");
+        SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
+        String sensor = p.getString("cadence_sensor", "gyro");
+        String method = p.getString("cadence_method", "acf");
         boolean useGyro = "gyro".equals(sensor);
         boolean useAcf  = !"spectral".equals(method);
         return new CadenceDetector(this, result -> lastCadenceResult = result, useGyro, useAcf);
