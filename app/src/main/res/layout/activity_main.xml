@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/colorBackground"
+    android:fillViewport="true">
+
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
@@ -77,8 +83,116 @@
             app:backgroundTint="@color/colorButtonStop" app:cornerRadius="14dp"/>
     </LinearLayout>
 
+
+    <!-- ═══ METRONOME SECTION ═══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/colorBackground"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="12dp">
+
+        <!-- Divider -->
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="@color/colorDivider" android:layout_marginBottom="10dp"/>
+
+        <!-- BPM row: − value + -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="48dp"
+            android:gravity="center_vertical" android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMetMinus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="44dp" android:layout_height="44dp"
+                android:text="−" android:textSize="22sp"
+                android:textColor="@color/colorTextSecondary"
+                app:strokeColor="@color/colorDivider" app:cornerRadius="8dp"
+                android:onClick="onMetMinus"/>
+            <TextView android:id="@+id/tvMetBpm"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:gravity="center"
+                android:text="80 BPM" android:textSize="26sp" android:textStyle="bold"
+                android:textColor="@color/colorAccent"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMetPlus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="44dp" android:layout_height="44dp"
+                android:text="+" android:textSize="22sp"
+                android:textColor="@color/colorTextSecondary"
+                app:strokeColor="@color/colorDivider" app:cornerRadius="8dp"
+                android:onClick="onMetPlus"/>
+        </LinearLayout>
+
+        <!-- BPM slider -->
+        <SeekBar android:id="@+id/sbMetBpm"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="140" android:progress="40"
+            android:layout_marginTop="4dp" android:layout_marginBottom="8dp"/>
+
+        <!-- Sound type: Maracas | Click | Beep -->
+        <RadioGroup android:id="@+id/rgMetSound"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="6dp">
+            <RadioButton android:id="@+id/rbMetMaracas"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:checked="true"
+                android:text="Maracas" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+            <RadioButton android:id="@+id/rbMetClick"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Click" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+            <RadioButton android:id="@+id/rbMetBeep"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Beep" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+        </RadioGroup>
+
+        <!-- Sound + Vibro checkboxes in 2 columns -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="4dp">
+            <CheckBox android:id="@+id/cbMetSoundStrong"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:checked="true"
+                android:text="Sound ↓" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+            <CheckBox android:id="@+id/cbMetVibStrong"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Vibro ↓" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="10dp">
+            <CheckBox android:id="@+id/cbMetSoundWeak"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:checked="true"
+                android:text="Sound ↑" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+            <CheckBox android:id="@+id/cbMetVibWeak"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:checked="true"
+                android:text="Vibro ↑" android:textColor="@color/colorTextSecondary"
+                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+        </LinearLayout>
+
+        <!-- Main toggle button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnMetronome"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent" android:layout_height="52dp"
+            android:text="▶  METRONOME ON"
+            android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"
+            app:backgroundTint="@color/colorButtonStart" app:cornerRadius="12dp"/>
+    </LinearLayout>
+
     <TextView android:id="@+id/tvStats" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginBottom="28dp"
         android:gravity="center" android:text="Avg  — km/h     — km"
         android:textColor="@color/colorTextSecondary" android:textSize="16sp"/>
 </LinearLayout>
+
+</ScrollView>
