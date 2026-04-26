@@ -223,6 +223,13 @@ public class MainActivity extends AppCompatActivity
         runOnUiThread(() -> refreshMetronomeButton(playing));
     }
 
+    @Override
+    public void onRideFinished(float avgKmh, float distKm, String timeStr) {
+        runOnUiThread(() ->
+            tvStats.setText(String.format(Locale.US,
+                "Avg  %.0f km/h     %.2f km     %s", avgKmh, distKm, timeStr)));
+    }
+
     private void updateCadenceDisplay() {
         if (!bound || service == null) return;
         CadenceDetector detector = service.getCadenceDetector();
@@ -255,7 +262,9 @@ public class MainActivity extends AppCompatActivity
                 llRunning.setVisibility(View.GONE);
                 tvPauseLabel.setVisibility(View.GONE);
                 tvSpeed.setText("0");
-                tvStats.setText("Avg  — km/h     — km");
+                // tvStats intentionally NOT reset here —
+                // onRideFinished() will fill it with the final summary.
+                // On first launch (before any ride) it keeps the placeholder from XML.
                 break;
             case RUNNING:
                 btnStart.setVisibility(View.GONE);

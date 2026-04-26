@@ -85,7 +85,9 @@ public class SpeedometerService extends Service {
 
     // Speed history for graph: [elapsed_sec, speedKmh]
     private final java.util.List<float[]> speedHistory = new java.util.ArrayList<>();
-    private long rideStartMs = -1;   // true = пауза поставлена автоматически
+    private long rideStartMs  = -1;   // ms when current ride started
+    private long totalPauseMs = 0;    // accumulated pause duration this ride
+    private long pauseStartMs = -1;   // ms when current pause started
 
     private SpeedListener listener;
 
@@ -93,6 +95,8 @@ public class SpeedometerService extends Service {
         void onSpeedUpdate(float speedKmh, float avgKmh, float distanceKm);
         void onStateChanged(TrackState state);
         default void onMetronomeChanged(boolean playing) {}
+        /** Called once when ride stops. Shows final summary in UI. */
+        default void onRideFinished(float avgKmh, float distKm, String timeStr) {}
     }
 
     private float   speedThresholdKmh;
@@ -172,6 +176,8 @@ public class SpeedometerService extends Service {
         slowStartMs         = -1;
         autoPaused          = false;
         rideStartMs         = System.currentTimeMillis();
+        totalPauseMs        = 0;
+        pauseStartMs        = -1;
         synchronized (speedHistory) { speedHistory.clear(); }
         state = TrackState.RUNNING;
         notifyStateChanged();
@@ -204,17 +210,30 @@ public class SpeedometerService extends Service {
         stopForeground(true);
         sendBroadcast(new Intent(ACTION_RIDE_STOPPED));
 
-        if (listener != null)
-            listener.onSpeedUpdate(0, 0, calculator.getTotalDistanceKm());
+        float finalAvg  = calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg);
+        float finalDist = calculator.getTotalDistanceKm();
+        long  activeMs  = rideStartMs > 0
+                ? (System.currentTimeMillis() - rideStartMs - totalPauseMs)
+                : 0L;
+        String timeStr  = fmtDuration(Math.max(0, activeMs));
+
+        if (listener != null) {
+            listener.onSpeedUpdate(0, finalAvg, finalDist);
+            listener.onRideFinished(finalAvg, finalDist, timeStr);
+        }
         speak(str("Ride stopped. Distance ", "Приїхали. Дистанція ", "Приехали. Дистанция ")
-                + fmtDist(calculator.getTotalDistanceKm()));
+                + fmtDist(finalDist)
+                + str(". Time ", ". Час ", ". Время ")
+                + timeStr);
     }
 
     public void togglePause() {
         if (state == TrackState.RUNNING) {
             autoPaused = false;
             state = TrackState.PAUSED;
+            pauseStartMs = System.currentTimeMillis();
             calculator.setAccumulating(false);
+            cadenceDetector.setPaused(true);
             notifyStateChanged();
             if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
             updateNotification(calculator.getSmoothedSpeed(),
@@ -224,7 +243,9 @@ public class SpeedometerService extends Service {
         } else if (state == TrackState.PAUSED) {
             autoPaused = false;
             state = TrackState.RUNNING;
+            if (pauseStartMs > 0) { totalPauseMs += System.currentTimeMillis() - pauseStartMs; pauseStartMs = -1; }
             calculator.setAccumulating(true);
+            cadenceDetector.setPaused(false);
             slowStartMs = -1;
             notifyStateChanged();
             lastAnyAnnounceMs = System.currentTimeMillis();
@@ -674,6 +695,15 @@ public class SpeedometerService extends Service {
         return s;
     }
 
+    /** Format milliseconds as h:mm:ss or m:ss */
+    private static String fmtDuration(long ms) {
+        long s = ms / 1000;
+        long h = s / 3600; s %= 3600;
+        long m = s / 60;   s %= 60;
+        if (h > 0) return String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s);
+        return String.format(java.util.Locale.US, "%d:%02d", m, s);
+    }
+
     private String fmtDist(float km) {
         if (km < 1f) {
             int m = Math.round(km * 1000);
@@ -754,7 +784,9 @@ public class SpeedometerService extends Service {
             "Долго стоите. Авто-пауза."));
         autoPaused = true;
         state = TrackState.PAUSED;
+        pauseStartMs = System.currentTimeMillis();
         calculator.setAccumulating(false);
+        cadenceDetector.setPaused(true);
         notifyStateChanged();
         if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
         updateNotification(calculator.getSmoothedSpeed(),

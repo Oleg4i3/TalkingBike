@@ -128,6 +128,7 @@ public class CadenceDetector implements SensorEventListener {
     private long rideStartMs = -1;
 
     private Result lastResult = Result.EMPTY;
+    private volatile boolean paused = false;
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -195,8 +196,8 @@ public class CadenceDetector implements SensorEventListener {
             processBuffer();
         }
 
-        // Graph: store the working signal magnitude for visualization
-        if (rideStartMs >= 0) {
+        // Graph: store the working signal magnitude for visualization (skip during pauses)
+        if (rideStartMs >= 0 && !paused) {
             float mag = (float) Math.sqrt(lpfX*lpfX + lpfY*lpfY + lpfZ*lpfZ);
             float elapsed = (System.currentTimeMillis() - rideStartMs) / 1000f;
             synchronized (rawSamples) {
@@ -417,7 +418,7 @@ public class CadenceDetector implements SensorEventListener {
 
         lastResult = new Result(rpm, confidence, stable, stableAvg);
 
-        if (rideStartMs >= 0 && rpm > 0) {
+        if (rideStartMs >= 0 && rpm > 0 && !paused) {
             float elapsed = (now - rideStartMs) / 1000f;
             synchronized (cadenceHistory) {
                 cadenceHistory.add(new float[]{elapsed, rpm, stable ? 1f : 0f});
