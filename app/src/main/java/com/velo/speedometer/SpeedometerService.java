@@ -796,10 +796,20 @@ public class SpeedometerService extends Service {
 
     /** Применяет новые настройки немедленно, не останавливая поездку. */
     public void reloadSettings() {
-        if (state == TrackState.STOPPED) return;
         boolean prevScreenAnnounce = screenAnnounceEnabled;
         boolean prevDoAnnounceAvg  = doAnnounceAvg;
         loadSettings();
+
+        // Пересоздаём детектор каденса всегда — не зависит от состояния поездки.
+        // Именно здесь менялся датчик (gyro/accel): раньше ранний return это блокировал.
+        boolean wasRunning = (state == TrackState.RUNNING);
+        cadenceDetector.stop();
+        cadenceDetector = createCadenceDetector();
+        if (wasRunning) cadenceDetector.start();
+
+        // Остальное только если поездка активна
+        if (state == TrackState.STOPPED) return;
+
         // Перезапускаем avg-таймер если изменилась галка или интервал
         if (prevDoAnnounceAvg || doAnnounceAvg) {
             if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
@@ -810,11 +820,6 @@ public class SpeedometerService extends Service {
             unregisterScreenReceiver();
             if (screenAnnounceEnabled) registerScreenReceiver();
         }
-        // Пересоздаём детектор каденса если изменился сенсор или метод
-        boolean wasRunning = (state == TrackState.RUNNING);
-        cadenceDetector.stop();
-        cadenceDetector = createCadenceDetector();
-        if (wasRunning) cadenceDetector.start();
     }
 
     private void loadSettings() {
