@@ -34,6 +34,11 @@ public class SettingsActivity extends AppCompatActivity {
     private CheckBox cbScreenAnnounce, cbEnhancedAudio;
     private CheckBox cbCadence, cbExcludePauses;
     private CheckBox cbCadenceGyro, cbCadenceAcf;
+    // Heart Rate
+    private CheckBox   cbAnnounceHr;
+    private com.google.android.material.slider.Slider slHrInterval;
+    private android.widget.Button btnSelectHrDevice;
+    private String     pendingHrAddress = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -169,7 +174,7 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("announce_hr",  cbAnnounceHr != null && cbAnnounceHr.isChecked())
                 .putInt("hr_interval_min",  slHrInterval  != null ? (int) slHrInterval.getValue() : 5)
                 .putString("hr_device_address", pendingHrAddress != null ? pendingHrAddress
-                        : p.getString("hr_device_address", null))
+                        : prefs().getString("hr_device_address", null))
                 .putString("cadence_sensor", (cbCadenceGyro != null && cbCadenceGyro.isChecked()) ? "gyro" : "accel")
                 .putString("cadence_method", (cbCadenceAcf  != null && cbCadenceAcf .isChecked()) ? "acf"  : "spectral")
                 .putBoolean("exclude_pauses_from_avg", cbExcludePauses.isChecked())
