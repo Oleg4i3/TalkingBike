@@ -1,6 +1,8 @@
 package com.velo.speedometer;
 
 import android.content.Intent;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.CheckBox;
@@ -78,7 +80,10 @@ public class SettingsActivity extends AppCompatActivity {
         cbWalkingSpeed  = findViewById(R.id.cbWalkingSpeed);
         cbScreenAnnounce= findViewById(R.id.cbScreenAnnounce);
         cbEnhancedAudio = findViewById(R.id.cbEnhancedAudio);
-        cbCadence    = findViewById(R.id.cbCadence);
+        cbCadence        = findViewById(R.id.cbCadence);
+        cbAnnounceHr     = findViewById(R.id.cbAnnounceHr);
+        slHrInterval     = findViewById(R.id.slHrInterval);
+        btnSelectHrDevice = findViewById(R.id.btnSelectHrDevice);
         cbCadenceGyro = findViewById(R.id.cbCadenceGyro);
         cbCadenceAcf  = findViewById(R.id.cbCadenceAcf);
         cbExcludePauses = findViewById(R.id.cbExcludePauses);
@@ -104,6 +109,13 @@ public class SettingsActivity extends AppCompatActivity {
         cbScreenAnnounce.setChecked(p.getBoolean("screen_announce",   true));
         cbEnhancedAudio .setChecked(p.getBoolean("enhanced_audio",    true));
         cbCadence    .setChecked(p.getBoolean("announce_cadence", false));
+        if (cbAnnounceHr  != null) cbAnnounceHr .setChecked(p.getBoolean("announce_hr", false));
+        if (slHrInterval  != null) slHrInterval .setValue(p.getInt("hr_interval_min", 5));
+        if (btnSelectHrDevice != null) {
+            String addr = p.getString("hr_device_address", null);
+            btnSelectHrDevice.setText(addr != null ? "HR: " + addr : "Select HR device");
+            btnSelectHrDevice.setOnClickListener(v -> showHrDeviceScanner());
+        }
         if (cbCadenceGyro != null) cbCadenceGyro.setChecked(!"accel".equals(p.getString("cadence_sensor","gyro")));
         if (cbCadenceAcf  != null) cbCadenceAcf .setChecked(!"spectral".equals(p.getString("cadence_method","acf")));
         cbExcludePauses .setChecked(p.getBoolean("exclude_pauses_from_avg", false));
@@ -154,6 +166,10 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("screen_announce",   cbScreenAnnounce.isChecked())
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
+                .putBoolean("announce_hr",  cbAnnounceHr != null && cbAnnounceHr.isChecked())
+                .putInt("hr_interval_min",  slHrInterval  != null ? (int) slHrInterval.getValue() : 5)
+                .putString("hr_device_address", pendingHrAddress != null ? pendingHrAddress
+                        : p.getString("hr_device_address", null))
                 .putString("cadence_sensor", (cbCadenceGyro != null && cbCadenceGyro.isChecked()) ? "gyro" : "accel")
                 .putString("cadence_method", (cbCadenceAcf  != null && cbCadenceAcf .isChecked()) ? "acf"  : "spectral")
                 .putBoolean("exclude_pauses_from_avg", cbExcludePauses.isChecked())
@@ -208,6 +224,56 @@ public class SettingsActivity extends AppCompatActivity {
                 new AlertDialog.Builder(this)
                         .setTitle(title).setMessage(msg)
                         .setPositiveButton("Got it", null).show());
+    }
+
+    private void showHrDeviceScanner() {
+        if (android.os.Build.VERSION.SDK_INT >= 31 &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT}, 42);
+            return;
+        }
+        android.app.AlertDialog.Builder dlg = new android.app.AlertDialog.Builder(this);
+        dlg.setTitle("Scanning for HR monitors…");
+        android.widget.ListView lv = new android.widget.ListView(this);
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1);
+        lv.setAdapter(adapter);
+        android.app.AlertDialog dialog = dlg.setView(lv)
+                .setNegativeButton("Cancel", (d, w) -> d.dismiss()).show();
+
+        // Temp monitor just for scanning
+        HeartRateMonitor scanner = new HeartRateMonitor(this, null);
+        java.util.Map<String,String> foundMap = new java.util.LinkedHashMap<>();
+        scanner.startScan(new HeartRateMonitor.ScanListener() {
+            @Override public void onDeviceFound(String name, String address, int rssi) {
+                if (!foundMap.containsKey(address)) {
+                    foundMap.put(address, name);
+                    adapter.add(name + "  (" + address + ")  " + rssi + "dBm");
+                    adapter.notifyDataSetChanged();
+                }
+            }
+            @Override public void onScanFinished() {
+                if (dialog.isShowing()) {
+                    try { dialog.setTitle("Scan finished — " + foundMap.size() + " found"); }
+                    catch (Exception ignored) {}
+                }
+            }
+        });
+        lv.setOnItemClickListener((parent, view, pos, id) -> {
+            String item = adapter.getItem(pos);
+            // extract address between ( )
+            int a = item.indexOf('('), b = item.indexOf(')');
+            if (a >= 0 && b > a) {
+                pendingHrAddress = item.substring(a+1, b).trim();
+                btnSelectHrDevice.setText("HR: " + pendingHrAddress);
+            }
+            scanner.stopScan();
+            dialog.dismiss();
+        });
+        dialog.setOnDismissListener(d2 -> scanner.stopScan());
     }
 
     private SharedPreferences prefs() {

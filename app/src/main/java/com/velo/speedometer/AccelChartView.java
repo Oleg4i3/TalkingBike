@@ -49,6 +49,11 @@ public class AccelChartView extends View {
     private List<float[]> accelData   = null; // [elapsed_sec, mag_ms2]
     private List<float[]> cadenceData = null; // [elapsed_sec, rpm, stable(1/0)]
     private List<float[]> speedData   = null; // [elapsed_sec, speedKmh]
+    private List<float[]> hrData      = null; // [elapsed_sec, bpm]
+
+    // HR Y range (right axis of bottom panel), fixed physiological range
+    private static final float HR_LO = 40f;
+    private static final float HR_HI = 200f;
 
     // ── Scroll / zoom state ───────────────────────────────────────────────────
     private float totalSec   = 0f;
@@ -71,6 +76,8 @@ public class AccelChartView extends View {
     private final Paint pCadUncert  = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pSpeed      = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pSpeedFill  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHr        = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHrLabel   = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pLabelL     = new Paint(Paint.ANTI_ALIAS_FLAG); // accel axis
     private final Paint pLabelR     = new Paint(Paint.ANTI_ALIAS_FLAG); // cadence axis
     private final Paint pLabelS     = new Paint(Paint.ANTI_ALIAS_FLAG); // speed axis
@@ -81,6 +88,7 @@ public class AccelChartView extends View {
     private final Path pathCadUncert = new Path();
     private final Path pathSpeed     = new Path();
     private final Path pathSpeedFill = new Path();
+    private final Path pathHr        = new Path();
 
     // ── Gestures ──────────────────────────────────────────────────────────────
     private final GestureDetector      gesture;
@@ -139,6 +147,9 @@ public class AccelChartView extends View {
         pLabelL.setColor(0xFF555555); pLabelL.setTextSize(sp10);
         pLabelR.setColor(0xFFAA9900); pLabelR.setTextSize(sp10);
         pLabelS.setColor(0xFF3A7A3A); pLabelS.setTextSize(sp10);
+        pHr.setColor(0xFFFF3333); pHr.setStyle(Paint.Style.STROKE);
+        pHr.setStrokeWidth(2.2f); pHr.setStrokeJoin(Paint.Join.ROUND);
+        pHrLabel.setColor(0xFFCC2222); pHrLabel.setTextSize(sp10);
         pLive.setColor(0xFFFF6B35);   pLive.setTextSize(sp12); pLive.setFakeBoldText(true);
 
         scroller = new OverScroller(ctx);
@@ -187,6 +198,7 @@ public class AccelChartView extends View {
     public void setCadenceData(List<float[]> cadence)  { cadenceData = cadence; }
     public void setSpeedData(List<float[]> speed)      { speedData   = speed; }
     public List<float[]> getDataSource()               { return accelData; }
+    public void setHrData(List<float[]> hr)                { hrData = hr; }
 
     /** Call every ~100 ms to refresh. */
     public void tick() {
@@ -195,7 +207,15 @@ public class AccelChartView extends View {
         synchronized (accelData) {
             if (!accelData.isEmpty()) latest = accelData.get(accelData.size()-1)[0];
         }
-        // Also check speed data for latest time
+        // Also check HR and speed data for latest time
+        if (hrData != null) {
+            synchronized (hrData) {
+                if (!hrData.isEmpty()) {
+                    float ht = hrData.get(hrData.size()-1)[0];
+                    if (ht > latest) latest = ht;
+                }
+            }
+        }
         if (speedData != null) {
             synchronized (speedData) {
                 if (!speedData.isEmpty()) {
@@ -360,10 +380,33 @@ public class AccelChartView extends View {
         canvas.drawPath(pathSpeedFill, pSpeedFill);
         canvas.drawPath(pathSpeed, pSpeed);
 
-        // Speed axis labels
+        // HR line
+        pathHr.reset();
+        boolean fhr = true;
+        if (hrData != null) {
+            int hi2 = bsearch(hrData, startSec - 5f);
+            synchronized (hrData) {
+                for (int i = hi2; i < hrData.size(); i++) {
+                    float[] h = hrData.get(i);
+                    if (h[0] > viewEndSec + 5f) break;
+                    float x  = tX(h[0], startSec, chartW);
+                    float y  = speedH * (1f - (h[1] - HR_LO) / (HR_HI - HR_LO));
+                    if (fhr) { pathHr.moveTo(x, y); fhr = false; }
+                    else        pathHr.lineTo(x, y);
+                }
+            }
+        }
+        canvas.drawPath(pathHr, pHr);
+
+        // Speed axis labels (left)
         canvas.drawText(fmt0(sHi)+" km/h", 4, pLabelS.getTextSize()+2, pLabelS);
         canvas.drawText(fmt0((sLo+sHi)/2f),  4, speedH/2f,               pLabelS);
         canvas.drawText(fmt0(sLo),           4, speedH-4,                 pLabelS);
+
+        // HR axis labels (right)
+        canvas.drawText(Math.round(HR_HI)+" bpm", W-rightPx+2, pHrLabel.getTextSize()+2, pHrLabel);
+        canvas.drawText(Math.round((HR_LO+HR_HI)/2f)+"",       W-rightPx+2, speedH/2f,  pHrLabel);
+        canvas.drawText(Math.round(HR_LO)+"",                  W-rightPx+2, speedH-4,   pHrLabel);
 
         canvas.drawLine(chartW, 0, chartW, speedH, pGrid);
 

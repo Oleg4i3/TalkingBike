@@ -27,6 +27,8 @@ import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.app.KeyguardManager;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import androidx.media.session.MediaButtonReceiver;
@@ -97,6 +99,7 @@ public class SpeedometerService extends Service {
         default void onMetronomeChanged(boolean playing) {}
         /** Called once when ride stops. Shows final summary in UI. */
         default void onRideFinished(float avgKmh, float distKm, String timeStr) {}
+        default void onHrChanged(int bpm, boolean connected) {}
     }
 
     private float   speedThresholdKmh;
@@ -130,6 +133,14 @@ public class SpeedometerService extends Service {
     private boolean            metVibStrong      = false;
     private boolean            metVibWeak        = true;
     private MediaSessionCompat mediaSession;
+
+    // ── Heart Rate Monitor ────────────────────────────────────────────────────
+    private HeartRateMonitor    heartRateMonitor;
+    private volatile int        lastHrBpm         = 0;
+    private boolean             doAnnounceHr      = false;
+    private int                 hrIntervalMin     = 5;
+    private Runnable            hrAnnounceRunnable;
+    private final List<float[]> hrHistory = new ArrayList<>();  // [elapsed_s, bpm]
     private PowerManager.WakeLock metWakeLock;
 
     @Override
@@ -138,6 +149,24 @@ public class SpeedometerService extends Service {
         handler    = new Handler(Looper.getMainLooper());
         calculator = new SpeedCalculator(0.3f);
         cadenceDetector = createCadenceDetector();
+        heartRateMonitor = new HeartRateMonitor(this, new HeartRateMonitor.HrListener() {
+            @Override public void onHeartRate(int bpm) {
+                lastHrBpm = bpm;
+                if (rideStartMs > 0) {
+                    float elapsed = (System.currentTimeMillis() - rideStartMs) / 1000f;
+                    synchronized (hrHistory) { hrHistory.add(new float[]{elapsed, bpm}); }
+                }
+                if (listener != null) listener.onHrChanged(bpm, true);
+            }
+            @Override public void onConnectionState(boolean connected) {
+                if (!connected) lastHrBpm = 0;
+                if (listener != null) listener.onHrChanged(lastHrBpm, connected);
+            }
+        });
+        // Auto-connect to saved device on service start
+        String savedAddr = getSharedPreferences("settings", MODE_PRIVATE)
+                .getString("hr_device_address", null);
+        if (savedAddr != null) heartRateMonitor.connect(savedAddr);
         createNotificationChannel();
         initMetronome();
         initTts();
@@ -191,6 +220,8 @@ public class SpeedometerService extends Service {
 
         requestLocationUpdates();
         cadenceDetector.start();
+        synchronized (hrHistory) { hrHistory.clear(); }
+        if (doAnnounceHr) scheduleHrTimer();
         registerTorchListener();
         if (screenAnnounceEnabled) registerScreenReceiver();
         if (doAnnounceAvg) scheduleAvgTimer();
@@ -204,6 +235,7 @@ public class SpeedometerService extends Service {
 
         if (locationManager != null) locationManager.removeUpdates(locationListener);
         cadenceDetector.stop();
+        if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
         if (avgRunnable != null)     handler.removeCallbacks(avgRunnable);
         unregisterTorchListener();
         unregisterScreenReceiver();
@@ -463,6 +495,23 @@ public class SpeedometerService extends Service {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Heart Rate
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void scheduleHrTimer() {
+        if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
+        hrAnnounceRunnable = new Runnable() {
+            @Override public void run() {
+                if (state == TrackState.RUNNING && lastHrBpm > 0) {
+                    speak(str("Heart rate ", "Пульс ", "Пульс ") + lastHrBpm);
+                }
+                if (doAnnounceHr) handler.postDelayed(this, hrIntervalMin * 60_000L);
+            }
+        };
+        handler.postDelayed(hrAnnounceRunnable, hrIntervalMin * 60_000L);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Metronome
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -692,6 +741,8 @@ public class SpeedometerService extends Service {
             // Detected something but not confident
             s += ". " + str("Cadence unstable", "Каденс нестабільний", "Каданс нестабильный");
         }
+        if (doAnnounceHr && lastHrBpm > 0)
+            s += ". " + str("Heart ", "Пульс ", "Пульс ") + lastHrBpm;
         return s;
     }
 
@@ -806,6 +857,13 @@ public class SpeedometerService extends Service {
         cadenceDetector.stop();
         cadenceDetector = createCadenceDetector();
         if (wasRunning) cadenceDetector.start();
+        // Reconnect HR if device changed
+        String hrAddr = getSharedPreferences("settings", MODE_PRIVATE).getString("hr_device_address", null);
+        heartRateMonitor.disconnect();
+        if (hrAddr != null) heartRateMonitor.connect(hrAddr);
+        // Reschedule HR timer
+        if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
+        if (doAnnounceHr && state == TrackState.RUNNING) scheduleHrTimer();
 
         // Остальное только если поездка активна
         if (state == TrackState.STOPPED) return;
@@ -841,6 +899,8 @@ public class SpeedometerService extends Service {
         gainDb                   = p.getFloat("gain_db",             12f);
         calculator.setAlpha(p.getFloat("ema_alpha", 0.3f));
         doAnnounceCadence        = p.getBoolean("announce_cadence",       false);
+        doAnnounceHr             = p.getBoolean("announce_hr",            false);
+        hrIntervalMin            = p.getInt("hr_interval_min",            5);
         excludePausesFromAvg     = p.getBoolean("exclude_pauses_from_avg", false);
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }
@@ -849,6 +909,7 @@ public class SpeedometerService extends Service {
     public void onDestroy() {
         stopMetronome();
         if (metronomeEngine != null) metronomeEngine.release();
+        if (heartRateMonitor != null) heartRateMonitor.disconnect();
         if (mediaSession    != null) mediaSession.release();
         if (metWakeLock != null && metWakeLock.isHeld()) metWakeLock.release();
         super.onDestroy();

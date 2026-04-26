@@ -50,6 +50,7 @@ public class MainActivity extends AppCompatActivity
     private CheckBox    cbMetSoundStrong, cbMetSoundWeak, cbMetVibStrong, cbMetVibWeak;
     private RadioGroup  rgMetSound;
     private com.google.android.material.button.MaterialButton btnMetronome;
+    private TextView    tvHr;
     private boolean     metronomeUiReady = false;
     private static final long DBL = 500;
 
@@ -85,6 +86,7 @@ public class MainActivity extends AppCompatActivity
         cbMetVibWeak     = findViewById(R.id.cbMetVibWeak);
         rgMetSound       = findViewById(R.id.rgMetSound);
         btnMetronome     = findViewById(R.id.btnMetronome);
+        tvHr             = findViewById(R.id.tvHr);
 
         sbMetBpm.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean user) {
@@ -216,6 +218,15 @@ public class MainActivity extends AppCompatActivity
             btnMetronome.setBackgroundTintList(
                     androidx.core.content.ContextCompat.getColorStateList(this, R.color.colorButtonStart));
         }
+    }
+
+    @Override
+    public void onHrChanged(int bpm, boolean connected) {
+        runOnUiThread(() -> {
+            if (tvHr == null) return;
+            if (!connected) tvHr.setText("♥ --");
+            else if (bpm > 0) tvHr.setText("♥ " + bpm);
+        });
     }
 
     @Override

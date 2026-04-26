@@ -69,6 +69,7 @@ public class CadenceGraphActivity extends AppCompatActivity {
         }
         if (service != null) {
             chart.setSpeedData(service.getSpeedHistory());
+            chart.setHrData(service.getHrHistory());
         }
     }
 
