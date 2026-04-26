@@ -171,6 +171,9 @@ public class CadenceDetector implements SensorEventListener {
     public List<float[]> getRawSamples()    { return rawSamples; }
     public List<float[]> getCadenceHistory(){ return cadenceHistory; }
 
+    /** When paused, sensor keeps running but no data is written to graph/history. */
+    public void setPaused(boolean paused) { this.paused = paused; }
+
     // ── SensorEventListener ───────────────────────────────────────────────────
 
     @Override
