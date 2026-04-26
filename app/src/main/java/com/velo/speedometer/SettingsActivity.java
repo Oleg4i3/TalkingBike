@@ -231,54 +231,116 @@ public class SettingsActivity extends AppCompatActivity {
                         .setPositiveButton("Got it", null).show());
     }
 
-    private void showHrDeviceScanner() {
-        if (android.os.Build.VERSION.SDK_INT >= 31 &&
-                checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
-                        != PackageManager.PERMISSION_GRANTED) {
+    // ── BLE permissions + scanner ──────────────────────────────────────────────
+
+    private static final int REQ_BT = 42;
+
+    private boolean hasBlePermissions() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            return checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                    == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        // API < 31: only legacy BLUETOOTH needed (no runtime permission required above API 28,
+        // but ACCESS_FINE_LOCATION was needed for LE scan; we handle gracefully)
+        return checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestBlePermissions() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
             requestPermissions(new String[]{
                     Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT}, 42);
+                    Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT);
+        } else {
+            requestPermissions(new String[]{
+                    android.Manifest.permission.ACCESS_FINE_LOCATION}, REQ_BT);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+            String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_BT) {
+            if (hasBlePermissions()) {
+                // Permissions just granted — open scanner now
+                openHrScanDialog();
+            } else {
+                android.widget.Toast.makeText(this,
+                        "Bluetooth permission denied — cannot scan",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void showHrDeviceScanner() {
+        if (!hasBlePermissions()) {
+            requestBlePermissions();
+            return;   // openHrScanDialog() called from onRequestPermissionsResult
+        }
+        openHrScanDialog();
+    }
+
+    private void openHrScanDialog() {
+        android.bluetooth.BluetoothAdapter bt = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+        if (bt == null || !bt.isEnabled()) {
+            android.widget.Toast.makeText(this,
+                    "Bluetooth is off — please enable it first",
+                    android.widget.Toast.LENGTH_LONG).show();
             return;
         }
-        android.app.AlertDialog.Builder dlg = new android.app.AlertDialog.Builder(this);
-        dlg.setTitle("Scanning for HR monitors…");
-        android.widget.ListView lv = new android.widget.ListView(this);
-        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1);
-        lv.setAdapter(adapter);
-        android.app.AlertDialog dialog = dlg.setView(lv)
-                .setNegativeButton("Cancel", (d, w) -> d.dismiss()).show();
 
-        // Temp monitor just for scanning
-        HeartRateMonitor scanner = new HeartRateMonitor(this, null);
+        android.widget.ListView lv = new android.widget.ListView(this);
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_list_item_1);
+        lv.setAdapter(adapter);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Scanning for HR monitors…")
+                .setView(lv)
+                .setNegativeButton("Cancel", (d, w) -> d.dismiss())
+                .show();
+
+        HeartRateMonitor hrScanner = new HeartRateMonitor(this, null);
         java.util.Map<String,String> foundMap = new java.util.LinkedHashMap<>();
-        scanner.startScan(new HeartRateMonitor.ScanListener() {
+
+        hrScanner.startScan(new HeartRateMonitor.ScanListener() {
             @Override public void onDeviceFound(String name, String address, int rssi) {
                 if (!foundMap.containsKey(address)) {
                     foundMap.put(address, name);
-                    adapter.add(name + "  (" + address + ")  " + rssi + "dBm");
-                    adapter.notifyDataSetChanged();
+                    String label = name + "  (" + address + ")  " + rssi + " dBm";
+                    runOnUiThread(() -> {
+                        adapter.add(label);
+                        adapter.notifyDataSetChanged();
+                        dialog.setTitle("Found " + foundMap.size() + " device(s)…");
+                    });
                 }
             }
             @Override public void onScanFinished() {
-                if (dialog.isShowing()) {
-                    try { dialog.setTitle("Scan finished — " + foundMap.size() + " found"); }
-                    catch (Exception ignored) {}
-                }
+                runOnUiThread(() -> {
+                    if (dialog.isShowing()) {
+                        dialog.setTitle(foundMap.isEmpty()
+                                ? "No HR monitors found"
+                                : "Scan done — " + foundMap.size() + " found");
+                    }
+                });
             }
         });
+
         lv.setOnItemClickListener((parent, view, pos, id) -> {
             String item = adapter.getItem(pos);
-            // extract address between ( )
             int a = item.indexOf('('), b = item.indexOf(')');
             if (a >= 0 && b > a) {
-                pendingHrAddress = item.substring(a+1, b).trim();
+                pendingHrAddress = item.substring(a + 1, b).trim();
                 btnSelectHrDevice.setText("HR: " + pendingHrAddress);
             }
-            scanner.stopScan();
+            hrScanner.stopScan();
             dialog.dismiss();
         });
-        dialog.setOnDismissListener(d2 -> scanner.stopScan());
+
+        dialog.setOnDismissListener(d -> hrScanner.stopScan());
     }
 
     private SharedPreferences prefs() {
