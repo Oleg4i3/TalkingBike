@@ -189,6 +189,12 @@
             app:backgroundTint="@color/colorButtonStart" app:cornerRadius="12dp"/>
     </LinearLayout>
 
+    <TextView android:id="@+id/tvHr"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:text="♥ --"
+        android:textColor="#FF3333" android:textSize="22sp"
+        android:paddingBottom="4dp"/>
+
     <TextView android:id="@+id/tvStats" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginBottom="28dp"
         android:gravity="center" android:text="Avg  — km/h     — km"

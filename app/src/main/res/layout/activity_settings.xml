@@ -254,6 +254,45 @@
                 app:trackColorInactive="@color/colorDivider"/>
         </LinearLayout>
 
+
+        <!-- ═══ HEART RATE ═══ -->
+        <TextView style="@style/SectionHeader" android:text="HEART RATE"/>
+        <LinearLayout style="@style/Card" android:orientation="vertical">
+            <!-- BLE device picker -->
+            <Button android:id="@+id/btnSelectHrDevice"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:text="Select HR device"
+                android:textColor="@color/colorText"
+                android:background="?attr/selectableItemBackground"
+                android:gravity="start|center_vertical"
+                android:paddingStart="12dp"/>
+            <!-- Announce HR toggle -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal"
+                android:paddingTop="4dp">
+                <CheckBox android:id="@+id/cbAnnounceHr"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Announce heart rate"
+                    android:textColor="@color/colorText" android:textSize="15sp"/>
+            </LinearLayout>
+            <!-- HR announce interval slider -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal"
+                android:paddingTop="4dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Interval (min):" android:textColor="@color/colorTextSecondary"
+                    android:textSize="13sp" android:minWidth="110dp"/>
+                <com.google.android.material.slider.Slider android:id="@+id/slHrInterval"
+                    android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:valueFrom="1" android:valueTo="15" android:stepSize="1"
+                    android:value="5"
+                    app:labelBehavior="floating"
+                    app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"/>
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- ═══ CADENCE ═══ -->
         <TextView style="@style/SectionHeader" android:text="CADENCE"/>
         <LinearLayout style="@style/Card" android:orientation="vertical">
