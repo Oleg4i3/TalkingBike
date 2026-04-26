@@ -194,7 +194,10 @@ public class SpeedometerService extends Service {
 
     public TrackState getState() { return state; }
     public void setSpeedListener(SpeedListener l) { listener = l; }
-    public CadenceDetector getCadenceDetector() { return cadenceDetector; }
+    public CadenceDetector   getCadenceDetector()  { return cadenceDetector; }
+    public HeartRateMonitor  getHeartRateMonitor() { return heartRateMonitor; }
+    public int               getLastHrBpm()        { return lastHrBpm; }
+    public List<float[]>     getHrHistory()        { return hrHistory; }
     /** Speed history since ride start — synchronize on the returned list to iterate. */
     public java.util.List<float[]> getSpeedHistory() { return speedHistory; }
 
