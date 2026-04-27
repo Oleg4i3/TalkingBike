@@ -510,7 +510,7 @@ public class SpeedometerService extends Service {
         hrAnnounceRunnable = new Runnable() {
             @Override public void run() {
                 if (state == TrackState.RUNNING && lastHrBpm > 0) {
-                    speak(str("Heart rate ", "Пульс ", "Пульс ") + lastHrBpm);
+                    speak(str("Heart rate ", "Пульс ", "Пульс ") + lastHrBpm, true);
                 }
                 if (doAnnounceHr) handler.postDelayed(this, hrIntervalSec * 1000L);
             }
@@ -708,23 +708,40 @@ public class SpeedometerService extends Service {
         });
     }
 
-    private void speak(String text) {
+    /**
+     * Speak text.
+     * @param queued  true = QUEUE_ADD (enqueue after current utterance, used for
+     *                HR announcements so they don't interrupt speed/avg).
+     *                false = QUEUE_FLUSH (interrupt and speak immediately).
+     */
+    private void speak(String text) { speak(text, false); }
+
+    private void speak(String text, boolean queued) {
         if (!ttsReady || tts == null) return;
         if (state == TrackState.PAUSED) return;
 
-        if (audioEnhancer != null) audioEnhancer.cancel();
+        if (!queued && audioEnhancer != null) audioEnhancer.cancel();
 
         lastTorchMs = System.currentTimeMillis();
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         boolean screenOff = pm != null && !pm.isInteractive();
 
+        int queueMode = queued ? TextToSpeech.QUEUE_ADD : TextToSpeech.QUEUE_FLUSH;
+
         if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
-            audioEnhancer.speak(text, null);
+            if (!queued) audioEnhancer.speak(text, null);
+            // For queued HR when screen is off: use standard TTS after enhancer finishes
+            // (AudioEnhancer has no queue API, so fall through to TTS for queued)
+            else {
+                Bundle params = new Bundle();
+                params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+                tts.speak(text, TextToSpeech.QUEUE_ADD, params, "sb_hr");
+            }
         } else {
             Bundle params = new Bundle();
             params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "sb");
+            tts.speak(text, queueMode, params, queued ? "sb_hr" : "sb");
         }
     }
 
