@@ -5,104 +5,136 @@
     android:background="@color/colorBackground"
     android:fillViewport="true">
 
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<LinearLayout
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/colorBackground" android:orientation="vertical"
     android:keepScreenOn="true">
 
+    <!-- ── Top bar: Graph | Settings | EXIT ─────────────────────────────── -->
     <RelativeLayout android:layout_width="match_parent" android:layout_height="52dp"
         android:paddingHorizontal="8dp">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnCadenceGraph"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content" android:layout_height="36dp"
+            android:layout_alignParentStart="true" android:layout_centerVertical="true"
+            android:layout_marginStart="4dp"
+            android:text="@string/btn_cadence_graph" android:textSize="12sp"
+            android:textColor="@color/colorTextSecondary"
+            app:strokeColor="@color/colorDivider" app:cornerRadius="8dp"/>
+        <!-- EXIT button — kills service + process -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnExit"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content" android:layout_height="36dp"
+            android:layout_toStartOf="@id/btnSettings"
+            android:layout_centerVertical="true"
+            android:layout_marginEnd="6dp"
+            android:text="EXIT" android:textSize="12sp"
+            android:textColor="#FF5555"
+            app:strokeColor="#FF5555" app:cornerRadius="8dp"/>
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/btnSettings" android:layout_width="44dp" android:layout_height="44dp"
             android:layout_alignParentEnd="true" android:layout_centerVertical="true"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_settings" android:padding="8dp"
             android:src="@drawable/ic_settings" android:tint="@color/colorTextSecondary"/>
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCadenceGraph"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:layout_alignParentStart="true"
-            android:layout_centerVertical="true"
-            android:layout_marginStart="4dp"
-            android:text="@string/btn_cadence_graph"
-            android:textSize="12sp"
-            android:textColor="@color/colorTextSecondary"
-            app:strokeColor="@color/colorDivider"
-            app:cornerRadius="8dp"/>
     </RelativeLayout>
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="3" android:gravity="center" android:orientation="vertical">
+    <!-- ── Speed + HR + Cadence block ───────────────────────────────────── -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:orientation="vertical"
+        android:paddingTop="4dp">
+
         <TextView android:id="@+id/tvPauseLabel" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginBottom="4dp"
+            android:layout_height="wrap_content" android:layout_marginBottom="2dp"
             android:letterSpacing="0.15" android:text="⏸  PAUSED"
             android:textColor="@color/colorButtonPause" android:textSize="14sp"
             android:textStyle="bold" android:visibility="gone"/>
+
+        <!-- Speed (giant) -->
         <TextView android:id="@+id/tvSpeed" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:fontFamily="sans-serif-thin"
             android:includeFontPadding="false" android:text="0"
-            android:textColor="@color/colorSpeed" android:textSize="130sp"/>
+            android:textColor="@color/colorSpeed" android:textSize="120sp"/>
+
         <TextView android:id="@+id/tvUnit" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:letterSpacing="0.25"
-            android:text="km/h" android:textColor="@color/colorTextSecondary" android:textSize="18sp"/>
-        <TextView android:id="@+id/tvCadence" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginTop="6dp"
-            android:letterSpacing="0.1" android:text=""
-            android:textColor="@color/colorAccent" android:textSize="22sp"
-            android:fontFamily="sans-serif-condensed"/>
+            android:text="km/h" android:textColor="@color/colorTextSecondary"
+            android:textSize="16sp" android:layout_marginTop="-8dp"/>
+
+        <!-- HR + Cadence row — shown only when relevant sensors active -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:orientation="horizontal"
+            android:paddingTop="6dp" android:paddingBottom="2dp">
+            <!-- Heart rate — red, visible only if HR connected + announced -->
+            <TextView android:id="@+id/tvHr"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:gravity="center"
+                android:text="♥ --" android:textColor="#FF3333"
+                android:textSize="38sp" android:textStyle="bold"
+                android:visibility="gone"/>
+            <!-- Cadence — blue, visible only if cadence announced -->
+            <TextView android:id="@+id/tvCadence"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:gravity="center"
+                android:text="" android:textColor="#4488FF"
+                android:textSize="38sp" android:textStyle="bold"
+                android:visibility="gone"/>
+        </LinearLayout>
     </LinearLayout>
 
+    <!-- ── Control buttons (compact) ────────────────────────────────────── -->
     <!-- START (when stopped) -->
     <com.google.android.material.button.MaterialButton android:id="@+id/btnStart"
         style="@style/Widget.MaterialComponents.Button"
-        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="2"
-        android:layout_marginHorizontal="28dp" android:layout_marginVertical="12dp"
+        android:layout_width="match_parent" android:layout_height="56dp"
+        android:layout_marginHorizontal="28dp" android:layout_marginTop="8dp"
+        android:layout_marginBottom="6dp"
         android:text="@string/btn_start" android:textColor="#FFFFFF"
-        android:textSize="34sp" android:textStyle="bold"
+        android:textSize="24sp" android:textStyle="bold"
         app:backgroundTint="@color/colorButtonStart" app:cornerRadius="14dp"/>
 
     <!-- PAUSE + STOP (when running/paused) -->
     <LinearLayout android:id="@+id/llRunningButtons"
-        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="2"
-        android:layout_marginHorizontal="28dp" android:layout_marginVertical="12dp"
+        android:layout_width="match_parent" android:layout_height="56dp"
+        android:layout_marginHorizontal="28dp" android:layout_marginTop="8dp"
+        android:layout_marginBottom="6dp"
         android:orientation="horizontal" android:visibility="gone">
         <com.google.android.material.button.MaterialButton android:id="@+id/btnPause"
             style="@style/Widget.MaterialComponents.Button"
-            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginEnd="8dp" android:text="@string/btn_pause"
-            android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="8dp"
+            android:text="@string/btn_pause" android:textColor="#FFFFFF"
+            android:textSize="18sp" android:textStyle="bold"
             app:backgroundTint="@color/colorButtonPause" app:cornerRadius="14dp"/>
         <com.google.android.material.button.MaterialButton android:id="@+id/btnStop"
             style="@style/Widget.MaterialComponents.Button"
-            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginStart="8dp" android:text="@string/btn_stop"
-            android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginStart="8dp"
+            android:text="@string/btn_stop" android:textColor="#FFFFFF"
+            android:textSize="18sp" android:textStyle="bold"
             app:backgroundTint="@color/colorButtonStop" app:cornerRadius="14dp"/>
     </LinearLayout>
 
+    <!-- ── Stats line ────────────────────────────────────────────────────── -->
+    <TextView android:id="@+id/tvStats" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginBottom="6dp"
+        android:gravity="center" android:text="Avg  — km/h     — km"
+        android:textColor="@color/colorTextSecondary" android:textSize="15sp"/>
 
-    <!-- ═══ METRONOME SECTION ═══ -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="@color/colorBackground"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="12dp">
+    <!-- ── Metronome section ──────────────────────────────────────────────── -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:background="@color/colorBackground"
+        android:paddingHorizontal="20dp" android:paddingTop="4dp" android:paddingBottom="12dp">
 
-        <!-- Divider -->
         <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="@color/colorDivider" android:layout_marginBottom="10dp"/>
+            android:background="@color/colorDivider" android:layout_marginBottom="8dp"/>
 
         <!-- BPM row: − value + -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="48dp"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="44dp"
             android:gravity="center_vertical" android:orientation="horizontal">
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnMetMinus"
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnMetMinus"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="44dp" android:layout_height="44dp"
                 android:text="−" android:textSize="22sp"
@@ -112,10 +144,9 @@
             <TextView android:id="@+id/tvMetBpm"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:gravity="center"
-                android:text="80 BPM" android:textSize="26sp" android:textStyle="bold"
+                android:text="80 BPM" android:textSize="24sp" android:textStyle="bold"
                 android:textColor="@color/colorAccent"/>
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnMetPlus"
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnMetPlus"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="44dp" android:layout_height="44dp"
                 android:text="+" android:textSize="22sp"
@@ -124,81 +155,65 @@
                 android:onClick="onMetPlus"/>
         </LinearLayout>
 
-        <!-- BPM slider -->
         <SeekBar android:id="@+id/sbMetBpm"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:max="140" android:progress="40"
-            android:layout_marginTop="4dp" android:layout_marginBottom="8dp"/>
+            android:layout_marginTop="4dp" android:layout_marginBottom="6dp"/>
 
-        <!-- Sound type: Maracas | Click | Beep -->
         <RadioGroup android:id="@+id/rgMetSound"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="6dp">
+            android:orientation="horizontal" android:layout_marginBottom="4dp">
             <RadioButton android:id="@+id/rbMetMaracas"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:checked="true"
                 android:text="Maracas" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
             <RadioButton android:id="@+id/rbMetClick"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Click" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
             <RadioButton android:id="@+id/rbMetBeep"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Beep" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
         </RadioGroup>
 
-        <!-- Sound + Vibro checkboxes in 2 columns -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="4dp">
+            android:orientation="horizontal" android:layout_marginBottom="2dp">
             <CheckBox android:id="@+id/cbMetSoundStrong"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:checked="true"
                 android:text="Sound ↓" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
             <CheckBox android:id="@+id/cbMetVibStrong"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Vibro ↓" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="10dp">
+            android:orientation="horizontal" android:layout_marginBottom="8dp">
             <CheckBox android:id="@+id/cbMetSoundWeak"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:checked="true"
                 android:text="Sound ↑" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
             <CheckBox android:id="@+id/cbMetVibWeak"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:checked="true"
                 android:text="Vibro ↑" android:textColor="@color/colorTextSecondary"
-                android:textSize="13sp" android:buttonTint="@color/colorAccent"/>
+                android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
         </LinearLayout>
 
-        <!-- Main toggle button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMetronome"
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnMetronome"
             style="@style/Widget.MaterialComponents.Button"
-            android:layout_width="match_parent" android:layout_height="52dp"
+            android:layout_width="match_parent" android:layout_height="48dp"
             android:text="▶  METRONOME ON"
-            android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"
+            android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
             app:backgroundTint="@color/colorButtonStart" app:cornerRadius="12dp"/>
     </LinearLayout>
 
-    <TextView android:id="@+id/tvHr"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center" android:text="♥ --"
-        android:textColor="#FF3333" android:textSize="22sp"
-        android:paddingBottom="4dp"/>
-
-    <TextView android:id="@+id/tvStats" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:layout_marginBottom="28dp"
-        android:gravity="center" android:text="Avg  — km/h     — km"
-        android:textColor="@color/colorTextSecondary" android:textSize="16sp"/>
 </LinearLayout>
-
 </ScrollView>

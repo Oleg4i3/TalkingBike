@@ -281,13 +281,12 @@
                 android:gravity="center_vertical" android:orientation="horizontal"
                 android:paddingTop="4dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Interval (min):" android:textColor="@color/colorTextSecondary"
+                    android:text="Interval (sec):" android:textColor="@color/colorTextSecondary"
                     android:textSize="13sp" android:minWidth="110dp"/>
                 <com.google.android.material.slider.Slider android:id="@+id/slHrInterval"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:valueFrom="1" android:valueTo="15" android:stepSize="1"
-                    android:value="5"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:valueFrom="7" android:valueTo="350" android:stepSize="7"
+                    android:value="60"
                     app:labelBehavior="floating"
                     app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"/>
             </LinearLayout>
