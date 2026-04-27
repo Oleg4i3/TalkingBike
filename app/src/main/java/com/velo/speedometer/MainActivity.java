@@ -50,6 +50,7 @@ public class MainActivity extends AppCompatActivity
     private CheckBox    cbMetSoundStrong, cbMetSoundWeak, cbMetVibStrong, cbMetVibWeak;
     private RadioGroup  rgMetSound;
     private com.google.android.material.button.MaterialButton btnMetronome;
+    private com.google.android.material.button.MaterialButton btnExit;
     private TextView    tvHr;
     private boolean     metronomeUiReady = false;
     private static final long DBL = 500;
@@ -86,6 +87,11 @@ public class MainActivity extends AppCompatActivity
         cbMetVibWeak     = findViewById(R.id.cbMetVibWeak);
         rgMetSound       = findViewById(R.id.rgMetSound);
         btnMetronome     = findViewById(R.id.btnMetronome);
+        btnExit          = findViewById(R.id.btnExit);
+        if (btnExit != null) btnExit.setOnClickListener(v -> {
+            if (bound) { service.exitApp(); }
+            else { finishAndRemoveTask(); }
+        });
         tvHr             = findViewById(R.id.tvHr);
 
         sbMetBpm.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -143,6 +149,8 @@ public class MainActivity extends AppCompatActivity
             bound = true;
             refreshUI(service.getState());
             syncMetronomeUi();
+            // Restore HR visibility after bind
+            onHrChanged(service.getLastHrBpm(), service.getLastHrBpm() > 0);
         }
         @Override public void onServiceDisconnected(ComponentName n) { bound = false; }
     };
@@ -224,8 +232,12 @@ public class MainActivity extends AppCompatActivity
     public void onHrChanged(int bpm, boolean connected) {
         runOnUiThread(() -> {
             if (tvHr == null) return;
-            if (!connected) tvHr.setText("♥ --");
-            else if (bpm > 0) tvHr.setText("♥ " + bpm);
+            boolean showHr = bound && service != null
+                    && getSharedPreferences("settings", MODE_PRIVATE)
+                       .getBoolean("announce_hr", false);
+            tvHr.setVisibility(showHr ? View.VISIBLE : View.GONE);
+            if (!connected || bpm <= 0) tvHr.setText("♥ --");
+            else tvHr.setText("♥ " + bpm);
         });
     }
 
@@ -242,22 +254,16 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void updateCadenceDisplay() {
-        if (!bound || service == null) return;
-        CadenceDetector detector = service.getCadenceDetector();
-        if (detector == null) { tvCadence.setText(""); return; }
-        CadenceDetector.Result r = detector.getLastResult();
-        if (r == null || (r.rpm == 0 && r.stableAvgRpm == 0)) {
-            tvCadence.setText("");
-            return;
-        }
-        if (r.stable && r.rpm > 0) {
-            tvCadence.setText(Math.round(r.rpm) + " rpm");
-        } else if (r.stableAvgRpm > 0) {
-            tvCadence.setText("~" + Math.round(r.stableAvgRpm) + " rpm");
-        } else if (r.rpm > 0) {
-            tvCadence.setText("? rpm");
+        if (!bound || tvCadence == null) return;
+        boolean showCad = getSharedPreferences("settings", MODE_PRIVATE)
+                .getBoolean("announce_cadence", false);
+        tvCadence.setVisibility(showCad ? View.VISIBLE : View.GONE);
+        if (!showCad) return;
+        CadenceDetector.Result r = service.getCadenceDetector().getLastResult();
+        if (r == null || r.rpm == 0) {
+            tvCadence.setText("~ rpm");
         } else {
-            tvCadence.setText("");
+            tvCadence.setText(String.format(Locale.US, "%.0f rpm", r.rpm));
         }
     }
 

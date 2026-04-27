@@ -53,6 +53,7 @@ public class SpeedometerService extends Service {
     public static final String ACTION_RELOAD   = "sb.RELOAD";
     public static final String ACTION_RIDE_STOPPED     = "sb.RIDE_STOPPED";
     public static final String ACTION_METRO_TOGGLE    = "sb.METRO_TOGGLE";
+    public static final String ACTION_EXIT            = "sb.EXIT";
 
     private final IBinder binder = new LocalBinder();
     public class LocalBinder extends Binder {
@@ -140,7 +141,7 @@ public class SpeedometerService extends Service {
     private HeartRateMonitor    heartRateMonitor;
     private volatile int        lastHrBpm         = 0;
     private boolean             doAnnounceHr      = false;
-    private int                 hrIntervalMin     = 5;
+    private int                 hrIntervalSec     = 60;
     private Runnable            hrAnnounceRunnable;
     private final List<float[]> hrHistory = new ArrayList<>();  // [elapsed_s, bpm]
     private PowerManager.WakeLock metWakeLock;
@@ -186,6 +187,7 @@ public class SpeedometerService extends Service {
             case ACTION_ANNOUNCE: announceNow(true); break;
             case ACTION_RELOAD:       reloadSettings();    break;
             case ACTION_METRO_TOGGLE: toggleMetronome();   break;
+            case ACTION_EXIT:         exitApp();             break;
         }
         return START_STICKY;
     }
@@ -510,10 +512,10 @@ public class SpeedometerService extends Service {
                 if (state == TrackState.RUNNING && lastHrBpm > 0) {
                     speak(str("Heart rate ", "Пульс ", "Пульс ") + lastHrBpm);
                 }
-                if (doAnnounceHr) handler.postDelayed(this, hrIntervalMin * 60_000L);
+                if (doAnnounceHr) handler.postDelayed(this, hrIntervalSec * 1000L);
             }
         };
-        handler.postDelayed(hrAnnounceRunnable, hrIntervalMin * 60_000L);
+        handler.postDelayed(hrAnnounceRunnable, hrIntervalSec * 1000L);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -529,6 +531,15 @@ public class SpeedometerService extends Service {
         boolean useGyro = !"accel".equals(p.getString("cadence_sensor", "gyro"));
         boolean useAcf  = !"spectral".equals(p.getString("cadence_method", "acf"));
         return new CadenceDetector(this, result -> lastCadenceResult = result, useGyro, useAcf);
+    }
+
+    public void exitApp() {
+        if (state != TrackState.STOPPED) stopTracking();
+        stopMetronome();
+        stopForeground(true);
+        stopSelf();
+        // Kill the process so MediaSession / AudioTrack are fully released
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     private void initMetronome() {
@@ -905,7 +916,7 @@ public class SpeedometerService extends Service {
         calculator.setAlpha(p.getFloat("ema_alpha", 0.3f));
         doAnnounceCadence        = p.getBoolean("announce_cadence",       false);
         doAnnounceHr             = p.getBoolean("announce_hr",            false);
-        hrIntervalMin            = p.getInt("hr_interval_min",            5);
+        hrIntervalSec            = p.getInt("hr_interval_sec",           60);
         excludePausesFromAvg     = p.getBoolean("exclude_pauses_from_avg", false);
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }

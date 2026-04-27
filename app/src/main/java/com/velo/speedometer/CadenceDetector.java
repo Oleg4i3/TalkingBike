@@ -160,6 +160,7 @@ public class CadenceDetector implements SensorEventListener {
         synchronized (rawSamples)     { rawSamples.clear(); }
         synchronized (cadenceHistory) { cadenceHistory.clear(); }
         lastResult = Result.EMPTY;
+        paused = false;   // always start fresh
     }
 
     public void stop() {
