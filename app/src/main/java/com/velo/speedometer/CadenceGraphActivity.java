@@ -207,38 +207,108 @@ public class CadenceGraphActivity extends AppCompatActivity {
     }
 
     private void onSaveUriPicked(Uri uri) {
-        if (uri == null || detector == null) return;
+        if (uri == null) return;
 
-        // Snapshot data on current thread (main), write on background
-        final float[][] snapshot;
-        List<float[]> samples = detector.getRawSamples();
-        synchronized (samples) {
-            snapshot = samples.toArray(new float[0][]);
-        }
+        // Snapshot all streams on main thread, write on background
+        final float[][] accel, cadence, speed, hr;
+        if (detector != null) {
+            List<float[]> s = detector.getRawSamples();
+            List<float[]> c = detector.getCadenceHistory();
+            synchronized (s) { accel   = s.toArray(new float[0][]); }
+            synchronized (c) { cadence = c.toArray(new float[0][]); }
+        } else { accel = new float[0][]; cadence = new float[0][]; }
+        if (service != null) {
+            List<float[]> sp = service.getSpeedHistory();
+            List<float[]> h  = service.getHrHistory();
+            synchronized (sp) { speed = sp.toArray(new float[0][]); }
+            synchronized (h)  { hr    = h.toArray(new float[0][]); }
+        } else { speed = new float[0][]; hr = new float[0][]; }
 
+        int total = accel.length;
         new Thread(() -> {
-            boolean ok = writeCsv(uri, snapshot);
+            boolean ok = writeCsv(uri, accel, cadence, speed, hr);
             runOnUiThread(() -> {
-                if (ok) {
+                if (ok)
                     Toast.makeText(this,
-                            getString(R.string.csv_saved_ok, snapshot.length),
+                            getString(R.string.csv_saved_ok, total),
                             Toast.LENGTH_LONG).show();
-                } else {
+                else
                     Toast.makeText(this, R.string.csv_saved_error,
                             Toast.LENGTH_LONG).show();
-                }
             });
         }).start();
     }
 
-    private boolean writeCsv(Uri uri, float[][] snapshot) {
+    /**
+     * Writes a multi-stream CSV with columns:
+     *   time_sec, gyro_mag (or accel_mag), cadence_rpm, cadence_stable,
+     *   speed_kmh, hr_bpm
+     *
+     * Streams are merged on the time axis via a simple linear-time merge.
+     * Each row gets the last known value for streams that don't have a
+     * sample at exactly that time (forward-fill).
+     */
+    private boolean writeCsv(Uri uri,
+                              float[][] accel, float[][] cadence,
+                              float[][] speed, float[][] hr) {
         try (OutputStream os = getContentResolver().openOutputStream(uri);
-             PrintWriter pw = new PrintWriter(os)) {
-            pw.println("time_sec,magnitude_ms2");
-            for (float[] s : snapshot) {
-                pw.printf(Locale.US, "%.3f,%.4f%n", s[0], s[1]);
+             java.io.BufferedWriter bw = new java.io.BufferedWriter(
+                     new java.io.OutputStreamWriter(os, java.nio.charset.StandardCharsets.UTF_8))) {
+
+            bw.write("time_sec,sensor_mag,cadence_rpm,cadence_stable,speed_kmh,hr_bpm
+");
+
+            // Pointers into each stream
+            int ia = 0, ic = 0, is2 = 0, ih = 0;
+            // Last-known values (forward-fill)
+            float mag = 0, rpm = 0, stable = 0, spd = 0, hrBpm = 0;
+
+            // Total events = union of all timestamps; drive by accel (highest freq)
+            // But also emit events from other streams even if no accel sample
+            // Use a simple approach: iterate accel; at each accel point, advance
+            // other streams up to that time.
+            int total = accel.length;
+            if (total == 0 && cadence.length == 0 && speed.length == 0 && hr.length == 0)
+                return false;  // nothing to write
+
+            // If no accel data, synthesize timestamps from other streams
+            float[] times;
+            if (total > 0) {
+                times = new float[total];
+                for (int i = 0; i < total; i++) times[i] = accel[i][0];
+            } else {
+                // collect all timestamps from other streams
+                java.util.TreeSet<Float> ts = new java.util.TreeSet<>();
+                for (float[] r : cadence) ts.add(r[0]);
+                for (float[] r : speed)   ts.add(r[0]);
+                for (float[] r : hr)      ts.add(r[0]);
+                times = new float[ts.size()];
+                int idx = 0; for (float t : ts) times[idx++] = t;
             }
-            pw.flush();
+
+            for (float t : times) {
+                // advance accel
+                if (ia < accel.length && accel[ia][0] <= t) {
+                    mag = accel[ia][1]; ia++;
+                }
+                // advance cadence (multiple samples may share same second)
+                while (ic < cadence.length && cadence[ic][0] <= t) {
+                    rpm = cadence[ic][1]; stable = cadence[ic][2]; ic++;
+                }
+                // advance speed
+                while (is2 < speed.length && speed[is2][0] <= t) {
+                    spd = speed[is2][1]; is2++;
+                }
+                // advance hr
+                while (ih < hr.length && hr[ih][0] <= t) {
+                    hrBpm = hr[ih][1]; ih++;
+                }
+                bw.write(String.format(Locale.US,
+                        "%.3f,%.4f,%.1f,%d,%.2f,%d
+",
+                        t, mag, rpm, (int)stable, spd, (int)hrBpm));
+            }
+            bw.flush();
             return true;
         } catch (IOException e) {
             return false;

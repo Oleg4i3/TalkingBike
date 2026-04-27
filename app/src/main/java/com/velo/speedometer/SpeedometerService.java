@@ -916,7 +916,7 @@ public class SpeedometerService extends Service {
         calculator.setAlpha(p.getFloat("ema_alpha", 0.3f));
         doAnnounceCadence        = p.getBoolean("announce_cadence",       false);
         doAnnounceHr             = p.getBoolean("announce_hr",            false);
-        hrIntervalSec            = p.getInt("hr_interval_sec",           60);
+        hrIntervalSec            = p.getInt("hr_interval_sec",           63);
         excludePausesFromAvg     = p.getBoolean("exclude_pauses_from_avg", false);
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }

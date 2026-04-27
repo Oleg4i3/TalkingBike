@@ -115,7 +115,12 @@ public class SettingsActivity extends AppCompatActivity {
         cbEnhancedAudio .setChecked(p.getBoolean("enhanced_audio",    true));
         cbCadence    .setChecked(p.getBoolean("announce_cadence", false));
         if (cbAnnounceHr  != null) cbAnnounceHr .setChecked(p.getBoolean("announce_hr", false));
-        if (slHrInterval  != null) slHrInterval .setValue(p.getInt("hr_interval_min", 5));
+        if (slHrInterval  != null) {
+            int raw = p.getInt("hr_interval_sec", 63);
+            // Slider stepSize=7: value must be a multiple of 7 in [7,350]
+            int snapped = Math.max(7, Math.min(350, (int)(Math.round(raw / 7.0) * 7)));
+            slHrInterval.setValue(snapped);
+        }
         if (btnSelectHrDevice != null) {
             String addr = p.getString("hr_device_address", null);
             btnSelectHrDevice.setText(addr != null ? "HR: " + addr : "Select HR device");
@@ -172,7 +177,7 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
                 .putBoolean("announce_hr",  cbAnnounceHr != null && cbAnnounceHr.isChecked())
-                .putInt("hr_interval_min",  slHrInterval  != null ? (int) slHrInterval.getValue() : 5)
+                .putInt("hr_interval_sec",  slHrInterval  != null ? Math.round(slHrInterval.getValue()) : 63)
                 .putString("hr_device_address", pendingHrAddress != null ? pendingHrAddress
                         : prefs().getString("hr_device_address", null))
                 .putString("cadence_sensor", (cbCadenceGyro != null && cbCadenceGyro.isChecked()) ? "gyro" : "accel")
