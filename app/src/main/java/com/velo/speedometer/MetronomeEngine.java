@@ -33,6 +33,7 @@ public class MetronomeEngine {
     private final Vibrator vibrator;
 
     // Playback params (volatile — set from UI thread, read from beat thread)
+    private volatile float   volume      = 1.0f;  // 0.0–1.0 linear
     private volatile int     soundType   = SOUND_MARACAS;
     private volatile boolean soundStrong = true;
     private volatile boolean soundWeak   = true;
@@ -77,6 +78,7 @@ public class MetronomeEngine {
             AudioTrack t = tracks[soundType][isStrong ? 0 : 1];
             t.stop();
             t.reloadStaticData();
+            t.setVolume(volume);
             t.play();
         }
 
@@ -90,6 +92,10 @@ public class MetronomeEngine {
     }
 
     // ── Settings (can be changed mid-ride) ────────────────────────────────────
+
+    /** volume: 0.0 = silent, 1.0 = full. Applied per-beat. */
+    public void setVolume(float v) { this.volume = Math.max(0f, Math.min(1f, v)); }
+    public float getVolume()       { return volume; }
 
     public void setParams(int soundType, boolean soundStrong, boolean soundWeak,
                           boolean vibStrong, boolean vibWeak) {

@@ -51,6 +51,9 @@ public class MainActivity extends AppCompatActivity
     private RadioGroup  rgMetSound;
     private com.google.android.material.button.MaterialButton btnMetronome;
     private com.google.android.material.button.MaterialButton btnExit;
+    private CheckBox    cbMetVolumeAdaptive, cbMetVolCadence, cbMetVolHr;
+    private com.google.android.material.slider.RangeSlider rsMetHrZone;
+    private TextView    tvHrZoneLabel;
     private TextView    tvHr;
     private boolean     metronomeUiReady = false;
     private static final long DBL = 500;
@@ -112,6 +115,29 @@ public class MainActivity extends AppCompatActivity
 
         btnMetronome.setOnClickListener(v -> { if (bound) service.toggleMetronome(); });
 
+        // Adaptive volume widgets
+        cbMetVolumeAdaptive = findViewById(R.id.cbMetVolumeAdaptive);
+        cbMetVolCadence     = findViewById(R.id.cbMetVolCadence);
+        cbMetVolHr          = findViewById(R.id.cbMetVolHr);
+        rsMetHrZone         = findViewById(R.id.rsMetHrZone);
+        tvHrZoneLabel       = findViewById(R.id.tvHrZoneLabel);
+
+        android.view.View.OnClickListener metVolListener = v -> pushMetVolParams();
+        if (cbMetVolumeAdaptive != null) cbMetVolumeAdaptive.setOnClickListener(metVolListener);
+        if (cbMetVolCadence     != null) cbMetVolCadence    .setOnClickListener(metVolListener);
+        if (cbMetVolHr          != null) cbMetVolHr         .setOnClickListener(metVolListener);
+
+        if (rsMetHrZone != null) {
+            rsMetHrZone.addOnChangeListener((slider, value, fromUser) -> {
+                if (!fromUser) return;
+                java.util.List<Float> vals = slider.getValues();
+                int lo = vals.get(0).intValue(), hi = vals.get(1).intValue();
+                if (tvHrZoneLabel != null)
+                    tvHrZoneLabel.setText("HR zone: " + lo + " – " + hi + " bpm");
+                pushMetVolParams();
+            });
+        }
+
         metronomeUiReady = true;
 
         btnStart.setOnClickListener(v -> { if (bound) service.startTracking(); });
@@ -170,6 +196,19 @@ public class MainActivity extends AppCompatActivity
         });
     }
 
+    private void pushMetVolParams() {
+        if (!bound || !metronomeUiReady) return;
+        boolean on  = cbMetVolumeAdaptive != null && cbMetVolumeAdaptive.isChecked();
+        boolean onC = cbMetVolCadence     != null && cbMetVolCadence    .isChecked();
+        boolean onH = cbMetVolHr          != null && cbMetVolHr         .isChecked();
+        int lo = 120, hi = 160;
+        if (rsMetHrZone != null) {
+            java.util.List<Float> v = rsMetHrZone.getValues();
+            lo = v.get(0).intValue(); hi = v.get(1).intValue();
+        }
+        service.setMetVolumeAdaptive(on, onC, onH, lo, hi);
+    }
+
     /** Push current UI state to service. */
     private void pushMetParams() {
         if (!bound || !metronomeUiReady) return;
@@ -197,6 +236,16 @@ public class MainActivity extends AppCompatActivity
         cbMetVibStrong  .setChecked(service.isMetVibStrong());
         cbMetVibWeak    .setChecked(service.isMetVibWeak());
         refreshMetronomeButton(service.isMetronomePlaying());
+        // Adaptive volume
+        if (cbMetVolumeAdaptive != null) cbMetVolumeAdaptive.setChecked(service.isMetVolumeAdaptive());
+        if (cbMetVolCadence != null)     cbMetVolCadence    .setChecked(service.isMetVolOnCadence());
+        if (cbMetVolHr != null)          cbMetVolHr         .setChecked(service.isMetVolOnHr());
+        if (rsMetHrZone != null) {
+            rsMetHrZone.setValues((float) service.getMetHrMin(), (float) service.getMetHrMax());
+            if (tvHrZoneLabel != null)
+                tvHrZoneLabel.setText("HR zone: " + service.getMetHrMin()
+                        + " – " + service.getMetHrMax() + " bpm");
+        }
     }
 
     public void onMetMinus(android.view.View v) {

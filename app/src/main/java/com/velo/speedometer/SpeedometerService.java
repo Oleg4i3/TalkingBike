@@ -135,6 +135,14 @@ public class SpeedometerService extends Service {
     private boolean            metSoundWeak      = true;
     private boolean            metVibStrong      = false;
     private boolean            metVibWeak        = true;
+    // Adaptive metronome volume
+    private boolean            metVolumeAdaptive = false;  // master switch
+    private boolean            metVolOnCadence   = true;   // boost on cadence match
+    private boolean            metVolOnHr        = false;  // boost on HR in zone
+    private int                metHrMin          = 120;    // HR zone min
+    private int                metHrMax          = 160;    // HR zone max
+    private static final float VOL_FULL          = 1.0f;
+    private static final float VOL_DIM           = dBtoLinear(-12f);
     private MediaSessionCompat mediaSession;
 
     // ── Heart Rate Monitor ────────────────────────────────────────────────────
@@ -551,7 +559,12 @@ public class SpeedometerService extends Service {
 
     private void loadMetronomePrefs() {
         SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        metronomeBpm   = p.getInt("metro_bpm", 80);
+        metronomeBpm      = p.getInt("metro_bpm", 80);
+        metVolumeAdaptive = p.getBoolean("metro_vol_adaptive", false);
+        metVolOnCadence   = p.getBoolean("metro_vol_cadence",  true);
+        metVolOnHr        = p.getBoolean("metro_vol_hr",       false);
+        metHrMin          = p.getInt("metro_hr_min",           120);
+        metHrMax          = p.getInt("metro_hr_max",           160);
         metSoundType   = p.getInt("metro_sound_type", MetronomeEngine.SOUND_MARACAS);
         metSoundStrong = p.getBoolean("metro_sound_strong", true);
         metSoundWeak   = p.getBoolean("metro_sound_weak", true);
@@ -618,6 +631,7 @@ public class SpeedometerService extends Service {
             while (metronomeRunning) {
                 beat++;
                 boolean strong = (beat % 2 == 1);
+                updateMetronomeVolume();
                 metronomeEngine.beat(strong);
                 long interval = 60000L / metronomeBpm;
                 nextTime += interval;
@@ -631,6 +645,47 @@ public class SpeedometerService extends Service {
         });
         metronomeThread.setDaemon(true);
         metronomeThread.start();
+    }
+
+    /**
+     * Decides metronome volume based on cadence proximity and HR zone.
+     * Full volume when the athlete is "on target"; -12 dB otherwise.
+     *
+     * Cadence check: current RPM within ±20 % of metronomeBpm.
+     * HR check: lastHrBpm inside [metHrMin, metHrMax].
+     * Either condition that is active and whose checkbox is ticked → FULL.
+     * If metVolumeAdaptive is off → always FULL.
+     */
+    private void updateMetronomeVolume() {
+        if (metronomeEngine == null) return;
+        if (!metVolumeAdaptive) { metronomeEngine.setVolume(VOL_FULL); return; }
+
+        boolean triggerCadence = false;
+        boolean triggerHr      = false;
+
+        if (metVolOnCadence) {
+            float rpm = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
+            if (rpm > 0) {
+                float ratio = rpm / metronomeBpm;
+                triggerCadence = (ratio >= 0.80f && ratio <= 1.20f);
+            }
+        }
+
+        if (metVolOnHr) {
+            triggerHr = (lastHrBpm > 0
+                    && lastHrBpm >= metHrMin && lastHrBpm <= metHrMax);
+        }
+
+        // "anyTrigger" = both enabled conditions are satisfied simultaneously.
+        // One checkbox: anyTrigger = that single condition.
+        // Two checkboxes: anyTrigger = cadence AND hr both OK (de Morgan:
+        //   NOT anyTrigger = at least one is off-target → FULL volume).
+        boolean anyTrigger = triggerCadence || triggerHr;
+        if (metVolOnCadence && metVolOnHr) anyTrigger = triggerCadence && triggerHr;
+
+        // FULL  when at least one parameter is off-target → reminds rider to adjust.
+        // DIM   when all active parameters are on-target  → confirms correct effort.
+        metronomeEngine.setVolume(anyTrigger ? VOL_DIM : VOL_FULL);
     }
 
     public void stopMetronome() {
@@ -664,6 +719,28 @@ public class SpeedometerService extends Service {
     }
 
     public int  getMetSoundType()   { return metSoundType; }
+    public boolean isMetVolumeAdaptive() { return metVolumeAdaptive; }
+    public boolean isMetVolOnCadence()   { return metVolOnCadence; }
+    public boolean isMetVolOnHr()        { return metVolOnHr; }
+    public int     getMetHrMin()         { return metHrMin; }
+    public int     getMetHrMax()         { return metHrMax; }
+
+    public void setMetVolumeAdaptive(boolean on, boolean onCadence, boolean onHr,
+                                     int hrMin, int hrMax) {
+        metVolumeAdaptive = on;
+        metVolOnCadence   = onCadence;
+        metVolOnHr        = onHr;
+        metHrMin          = hrMin;
+        metHrMax          = hrMax;
+        getSharedPreferences("settings", MODE_PRIVATE).edit()
+                .putBoolean("metro_vol_adaptive", on)
+                .putBoolean("metro_vol_cadence",  onCadence)
+                .putBoolean("metro_vol_hr",        onHr)
+                .putInt("metro_hr_min",            hrMin)
+                .putInt("metro_hr_max",            hrMax)
+                .apply();
+        if (!on) metronomeEngine.setVolume(VOL_FULL);
+    }
     public boolean isMetSoundStrong(){ return metSoundStrong; }
     public boolean isMetSoundWeak()  { return metSoundWeak; }
     public boolean isMetVibStrong()  { return metVibStrong; }
@@ -780,6 +857,10 @@ public class SpeedometerService extends Service {
     }
 
     /** Format milliseconds as h:mm:ss or m:ss */
+    private static float dBtoLinear(float dB) {
+        return (float) Math.pow(10.0, dB / 20.0);
+    }
+
     private static String fmtDuration(long ms) {
         long s = ms / 1000;
         long h = s / 3600; s %= 3600;

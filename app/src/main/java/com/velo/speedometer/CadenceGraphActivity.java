@@ -40,7 +40,8 @@ public class CadenceGraphActivity extends AppCompatActivity {
     private TextView        tvRpm;
     private TextView        tvSamples;
     private MaterialButton  btnLive;
-    private MaterialButton  btnSaveCsv;
+    private MaterialButton  btnSaveSensor;
+    private MaterialButton  btnSaveRide;
 
     // ── Service binding ───────────────────────────────────────────────────────
     private SpeedometerService service;
@@ -91,10 +92,14 @@ public class CadenceGraphActivity extends AppCompatActivity {
         }
     };
 
-    // ── CSV save launcher ─────────────────────────────────────────────────────
-    private final ActivityResultLauncher<String> saveLauncher =
+    // ── CSV save launchers ────────────────────────────────────────────────────
+    private final ActivityResultLauncher<String> saveSensorLauncher =
             registerForActivityResult(new ActivityResultContracts.CreateDocument("text/csv"),
-                    this::onSaveUriPicked);
+                    this::onSaveSensorUri);
+
+    private final ActivityResultLauncher<String> saveRideLauncher =
+            registerForActivityResult(new ActivityResultContracts.CreateDocument("text/csv"),
+                    this::onSaveRideUri);
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -112,10 +117,15 @@ public class CadenceGraphActivity extends AppCompatActivity {
         tvRpm      = findViewById(R.id.tvGraphRpm);
         tvSamples  = findViewById(R.id.tvSampleCount);
         btnLive    = findViewById(R.id.btnScrollEnd);
-        btnSaveCsv = findViewById(R.id.btnSaveCsv);
+        btnSaveSensor = findViewById(R.id.btnSaveSensor);
+        btnSaveRide   = findViewById(R.id.btnSaveRide);
 
         btnLive.setOnClickListener(v -> chart.scrollToEnd());
-        btnSaveCsv.setOnClickListener(v -> launchSave());
+        String ts2 = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        if (btnSaveSensor != null)
+            btnSaveSensor.setOnClickListener(v -> saveSensorLauncher.launch("sensor_" + ts2 + ".csv"));
+        if (btnSaveRide != null)
+            btnSaveRide.setOnClickListener(v -> saveRideLauncher.launch("ride_" + ts2 + ".csv"));
     }
 
     @Override
@@ -193,30 +203,53 @@ public class CadenceGraphActivity extends AppCompatActivity {
     // ── Save ──────────────────────────────────────────────────────────────────
 
     private void offerSave() {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.dialog_save_title)
-                .setMessage(R.string.dialog_save_message)
-                .setPositiveButton(R.string.dialog_save_yes, (d, w) -> launchSave())
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    private void launchSave() {
+        // Both buttons are already wired in onCreate; this dialog is now unused.
+        // Kept for compatibility — just launch sensor save as default.
         String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        saveLauncher.launch("cadence_" + ts + ".csv");
+        saveSensorLauncher.launch("sensor_" + ts + ".csv");
     }
 
 
-    private void onSaveUriPicked(Uri uri) {
+    // ── Sensor CSV: time + raw sensor magnitude ─────────────────────────────
+    private void onSaveSensorUri(Uri uri) {
+        if (uri == null || detector == null) return;
+        List<float[]> src = detector.getRawSamples();
+        final float[][] snap;
+        synchronized (src) { snap = src.toArray(new float[0][]); }
+        new Thread(() -> {
+            boolean ok = writeSensorCsv(uri, snap);
+            runOnUiThread(() -> Toast.makeText(this,
+                    ok ? getString(R.string.csv_saved_ok, snap.length)
+                       : getString(R.string.csv_saved_error),
+                    Toast.LENGTH_LONG).show());
+        }).start();
+    }
+
+    private boolean writeSensorCsv(Uri uri, float[][] data) {
+        try (OutputStream os = getContentResolver().openOutputStream(uri);
+             java.io.BufferedWriter bw = new java.io.BufferedWriter(
+                     new java.io.OutputStreamWriter(os,
+                             java.nio.charset.StandardCharsets.UTF_8))) {
+            bw.write("time_sec,sensor_mag");
+            bw.newLine();
+            for (float[] row : data) {
+                bw.write(String.format(Locale.US, "%.3f,%.5f", row[0], row[1]));
+                bw.newLine();
+            }
+            bw.flush();
+            return true;
+        } catch (IOException e) { return false; }
+    }
+
+    // ── Ride CSV: speed, cadence, HR (one row per second approx) ─────────────
+    private void onSaveRideUri(Uri uri) {
         if (uri == null) return;
 
-        final float[][] accel, cadence, speed, hr;
+        final float[][] cadence, speed, hr;
         if (detector != null) {
-            List<float[]> s = detector.getRawSamples();
             List<float[]> c = detector.getCadenceHistory();
-            synchronized (s) { accel   = s.toArray(new float[0][]); }
             synchronized (c) { cadence = c.toArray(new float[0][]); }
-        } else { accel = new float[0][]; cadence = new float[0][]; }
+        } else { cadence = new float[0][]; }
         if (service != null) {
             List<float[]> sp = service.getSpeedHistory();
             List<float[]> h  = service.getHrHistory();
@@ -224,68 +257,46 @@ public class CadenceGraphActivity extends AppCompatActivity {
             synchronized (h)  { hr    = h.toArray(new float[0][]); }
         } else { speed = new float[0][]; hr = new float[0][]; }
 
-        final int total = accel.length;
         new Thread(() -> {
-            boolean ok = writeCsv(uri, accel, cadence, speed, hr);
-            runOnUiThread(() -> {
-                if (ok)
-                    Toast.makeText(this,
-                            getString(R.string.csv_saved_ok, total),
-                            Toast.LENGTH_LONG).show();
-                else
-                    Toast.makeText(this, R.string.csv_saved_error,
-                            Toast.LENGTH_LONG).show();
-            });
+            boolean ok = writeRideCsv(uri, cadence, speed, hr);
+            runOnUiThread(() -> Toast.makeText(this,
+                    ok ? "Ride data saved" : getString(R.string.csv_saved_error),
+                    Toast.LENGTH_LONG).show());
         }).start();
     }
 
-    private boolean writeCsv(Uri uri,
-                              float[][] accel, float[][] cadence,
-                              float[][] speed, float[][] hr) {
+    private boolean writeRideCsv(Uri uri,
+                                  float[][] cadence, float[][] speed, float[][] hr) {
+        // Build union of timestamps from all three streams, sorted
+        java.util.TreeSet<Float> tsSet = new java.util.TreeSet<>();
+        for (float[] r : cadence) tsSet.add(r[0]);
+        for (float[] r : speed)   tsSet.add(r[0]);
+        for (float[] r : hr)      tsSet.add(r[0]);
+        if (tsSet.isEmpty()) return false;
+
         try (OutputStream os = getContentResolver().openOutputStream(uri);
              java.io.BufferedWriter bw = new java.io.BufferedWriter(
                      new java.io.OutputStreamWriter(os,
                              java.nio.charset.StandardCharsets.UTF_8))) {
-
-            bw.write("time_sec,sensor_mag,cadence_rpm,cadence_stable,speed_kmh,hr_bpm");
+            bw.write("time_sec,speed_kmh,cadence_rpm,cadence_stable,hr_bpm");
             bw.newLine();
 
-            int ia = 0, ic = 0, is2 = 0, ih = 0;
-            float mag = 0, rpm = 0, stable = 0, spd = 0, hrBpm = 0;
+            int ic = 0, is2 = 0, ih = 0;
+            float rpm = 0, stable = 0, spd = 0, hrBpm = 0;
 
-            // Build time axis: use accel timestamps; if empty, union of all streams
-            float[] times;
-            if (accel.length > 0) {
-                times = new float[accel.length];
-                for (int i = 0; i < accel.length; i++) times[i] = accel[i][0];
-            } else {
-                java.util.TreeSet<Float> ts = new java.util.TreeSet<>();
-                for (float[] r : cadence) ts.add(r[0]);
-                for (float[] r : speed)   ts.add(r[0]);
-                for (float[] r : hr)      ts.add(r[0]);
-                if (ts.isEmpty()) return false;
-                times = new float[ts.size()];
-                int idx = 0;
-                for (float t : ts) times[idx++] = t;
-            }
-
-            for (float t : times) {
-                if (ia < accel.length   && accel[ia][0]     <= t) { mag   = accel[ia][1];    ia++;  }
-                while (ic  < cadence.length && cadence[ic][0]   <= t) { rpm   = cadence[ic][1]; stable = cadence[ic][2]; ic++; }
-                while (is2 < speed.length   && speed[is2][0]    <= t) { spd   = speed[is2][1]; is2++; }
-                while (ih  < hr.length      && hr[ih][0]        <= t) { hrBpm = hr[ih][1];     ih++;  }
-
-                bw.write(String.format(Locale.US,
-                        "%.3f,%.4f,%.1f,%d,%.2f,%d",
-                        t, mag, rpm, (int) stable, spd, (int) hrBpm));
+            for (float t : tsSet) {
+                while (ic  < cadence.length && cadence[ic][0]  <= t) { rpm = cadence[ic][1]; stable = cadence[ic][2]; ic++; }
+                while (is2 < speed.length   && speed[is2][0]   <= t) { spd = speed[is2][1]; is2++; }
+                while (ih  < hr.length      && hr[ih][0]        <= t) { hrBpm = hr[ih][1]; ih++; }
+                bw.write(String.format(Locale.US, "%.3f,%.2f,%.1f,%d,%d",
+                        t, spd, rpm, (int) stable, (int) hrBpm));
                 bw.newLine();
             }
             bw.flush();
             return true;
-        } catch (IOException e) {
-            return false;
-        }
+        } catch (IOException e) { return false; }
     }
+
 
     // ── Formatters ────────────────────────────────────────────────────────────
 
