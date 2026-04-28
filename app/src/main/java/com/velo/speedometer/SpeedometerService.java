@@ -626,15 +626,37 @@ public class SpeedometerService extends Service {
         if (!metWakeLock.isHeld()) metWakeLock.acquire(2 * 60 * 60 * 1000L);
         notifyMetronomeChanged();
         metronomeThread = new Thread(() -> {
+            // metronomeBpm = cadence RPM target = strong beats per minute.
+            // If both strong+weak are enabled:
+            //   strong beat at t=0, weak beat at t=halfInterval, next strong at t=fullInterval
+            //   fullInterval  = 60000 / metronomeBpm   (one pedal revolution)
+            //   halfInterval  = fullInterval / 2        (half revolution)
+            // If only strong (or only weak) is enabled:
+            //   single tick at fullInterval
             long nextTime = System.currentTimeMillis();
-            int beat = 0;
             while (metronomeRunning) {
-                beat++;
-                boolean strong = (beat % 2 == 1);
+                boolean bothEnabled = metSoundStrong && metSoundWeak;
+                long fullInterval  = 60000L / Math.max(1, metronomeBpm);
+                long halfInterval  = fullInterval / 2;
+
+                // Strong beat
                 updateMetronomeVolume();
-                metronomeEngine.beat(strong);
-                long interval = 60000L / metronomeBpm;
-                nextTime += interval;
+                metronomeEngine.beat(true);
+
+                if (bothEnabled) {
+                    // Sleep half interval then play weak beat
+                    nextTime += halfInterval;
+                    long s1 = nextTime - System.currentTimeMillis();
+                    if (s1 > 0) try { Thread.sleep(s1); } catch (InterruptedException e) { return; }
+
+                    updateMetronomeVolume();
+                    metronomeEngine.beat(false);
+
+                    nextTime += halfInterval;
+                } else {
+                    nextTime += fullInterval;
+                }
+
                 long sleep = nextTime - System.currentTimeMillis();
                 if (sleep > 0) {
                     try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
@@ -667,6 +689,7 @@ public class SpeedometerService extends Service {
             float rpm = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
             if (rpm > 0) {
                 float ratio = rpm / metronomeBpm;
+                // metronomeBpm = cadence RPM target, so compare directly
                 triggerCadence = (ratio >= 0.80f && ratio <= 1.20f);
             }
         }
