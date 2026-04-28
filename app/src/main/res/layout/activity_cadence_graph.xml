@@ -76,12 +76,26 @@
             app:cornerRadius="10dp"/>
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSaveCsv"
+            android:id="@+id/btnSaveSensor"
             style="@style/Widget.MaterialComponents.Button"
             android:layout_width="0dp"
             android:layout_height="48dp"
-            android:layout_weight="2"
-            android:text="@string/btn_save_csv"
+            android:layout_weight="3"
+            android:layout_marginEnd="6dp"
+            android:text="Save Sensor"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="@color/colorTextSecondary"
+            app:cornerRadius="10dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSaveRide"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="3"
+            android:text="Save Ride"
+            android:textSize="12sp"
             android:textColor="#FFFFFF"
             app:backgroundTint="@color/colorAccent"
             app:cornerRadius="10dp"/>
