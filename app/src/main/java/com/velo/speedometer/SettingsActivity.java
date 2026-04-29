@@ -43,6 +43,7 @@ public class SettingsActivity extends AppCompatActivity {
     private com.google.android.material.slider.RangeSlider rsHrZone;
     private TextView tvHrZoneLabel;
     private int        hrMaxAge = 185;
+    private android.widget.Spinner spinTtsLang;
     private com.google.android.material.slider.Slider slHrInterval;
     private android.widget.Button btnSelectHrDevice;
     private String     pendingHrAddress = null;
@@ -97,7 +98,8 @@ public class SettingsActivity extends AppCompatActivity {
         cbHrAlert            = findViewById(R.id.cbHrAlert);
         cbAnnounceRideTime   = findViewById(R.id.cbAnnounceRideTime);
         cbRideTimeExclPauses = findViewById(R.id.cbRideTimeExclPauses);
-        slCadMinPct          = findViewById(R.id.slCadMinPct);
+        slCadMinPct   = findViewById(R.id.slCadMinPct);
+        spinTtsLang   = findViewById(R.id.spinTtsLang);
         rsHrZone             = findViewById(R.id.rsHrZone);
         tvHrZoneLabel        = findViewById(R.id.tvHrZoneLabel);
         if (rsHrZone != null) {
@@ -151,12 +153,22 @@ public class SettingsActivity extends AppCompatActivity {
         }
         if (cbAnnounceRideTime   != null) cbAnnounceRideTime  .setChecked(p.getBoolean("announce_ride_time", false));
         if (cbRideTimeExclPauses != null) cbRideTimeExclPauses.setChecked(p.getBoolean("ride_time_excl_pauses", true));
-        if (slCadMinPct          != null) slCadMinPct         .setValue(p.getInt("metro_cad_min_pct", 80));
+        if (slCadMinPct != null) {
+            int raw = p.getInt("metro_cad_min_pct", 10);
+            slCadMinPct.setValue(Math.max(0, Math.min(30, raw)));
+        }
         if (slHrInterval  != null) {
             int raw = p.getInt("hr_interval_sec", 63);
             // Slider stepSize=7: value must be a multiple of 7 in [7,350]
             int snapped = Math.max(7, Math.min(350, (int)(Math.round(raw / 7.0) * 7)));
             slHrInterval.setValue(snapped);
+        }
+        if (spinTtsLang != null) {
+            String cur = p.getString("tts_lang", "auto");
+            String[] vals = {"auto", "en", "uk", "ru"};
+            for (int i = 0; i < vals.length; i++) {
+                if (vals[i].equals(cur)) { spinTtsLang.setSelection(i); break; }
+            }
         }
         if (btnSelectHrDevice != null) {
             String addr = p.getString("hr_device_address", null);
@@ -213,6 +225,9 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("screen_announce",   cbScreenAnnounce.isChecked())
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
+                .putString("tts_lang", spinTtsLang != null
+                        ? new String[]{"auto","en","uk","ru"}[spinTtsLang.getSelectedItemPosition()]
+                        : "auto")
                 .putBoolean("announce_hr",         cbAnnounceHr         != null && cbAnnounceHr        .isChecked())
                 .putBoolean("hr_alert_enabled",    cbHrAlert            != null && cbHrAlert           .isChecked())
                 .putInt("hr_alert_min", rsHrZone != null && !rsHrZone.getValues().isEmpty() ? rsHrZone.getValues().get(0).intValue() : 120)
@@ -230,6 +245,8 @@ public class SettingsActivity extends AppCompatActivity {
         // Применяем настройки немедленно, если сервис уже запущен
         startService(new Intent(this, SpeedometerService.class)
                 .setAction(SpeedometerService.ACTION_RELOAD));
+        startService(new Intent(this, SpeedometerService.class)
+                .setAction("sb.REINIT_TTS"));
         finish();
     }
 

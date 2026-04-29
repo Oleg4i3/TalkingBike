@@ -159,11 +159,17 @@ public class SpeedometerService extends Service {
     private boolean             resumedPending      = false;  // de-dup "resumed"
     // HR zone alert
     private boolean             hrAlertEnabled      = false;
-    private boolean             hrAlertTriggered    = false;  // one-shot flag
     private int                 hrAlertMin          = 120;
     private int                 hrAlertMax          = 160;
+    // Hysteresis: track how long HR has been continuously outside zone
+    // and how long it has been back inside (to re-arm alert).
+    private long                hrOutsideSinceMs    = -1;   // when breach started
+    private long                hrInsideSinceMs     = -1;   // when returned to zone
+    private boolean             hrAlertLowFired     = false; // one-shot low alert
+    private boolean             hrAlertHighFired    = false; // one-shot high alert
+    private static final long   HR_HYSTERESIS_MS    = 10_000L; // 10 seconds
     // Cadence volume threshold
-    private int                 metCadenceMinPct    = 80;     // % of metronomeBpm
+    private int                 metCadenceMinPct    = 10;     // % tolerance below metronomeBpm
     private final List<float[]> hrHistory = new ArrayList<>();  // [elapsed_s, bpm]
     private PowerManager.WakeLock metWakeLock;
 
@@ -211,6 +217,7 @@ public class SpeedometerService extends Service {
             case ACTION_RELOAD:       reloadSettings();    break;
             case ACTION_METRO_TOGGLE: toggleMetronome();   break;
             case ACTION_EXIT:         exitApp();             break;
+            case "sb.REINIT_TTS":    reinitTts();           break;
         }
         return START_STICKY;
     }
@@ -257,8 +264,11 @@ public class SpeedometerService extends Service {
         if (doAnnounceAvg)      scheduleAvgTimer();
         if (doAnnounceCadence)  scheduleCadenceTimer();
         if (doAnnounceRideTime) scheduleRideTimeTimer();
-        resumedPending   = false;
-        hrAlertTriggered = false;
+        resumedPending      = false;
+        hrAlertLowFired     = false;
+        hrAlertHighFired    = false;
+        hrOutsideSinceMs    = -1;
+        hrInsideSinceMs     = -1;
         speak(str("Let's go", "Поїхали", "Погнали"));
     }
 
@@ -579,19 +589,43 @@ public class SpeedometerService extends Service {
     // Heart Rate
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * HR zone alert with 10-second hysteresis on both entry and exit.
+     *
+     * BREACH: alert fires only after HR has been outside zone for ≥10 s continuously.
+     * RE-ARM: alert re-arms only after HR has been back inside zone for ≥10 s.
+     * Each boundary (low/high) tracked independently.
+     */
     private void checkHrAlert(int bpm) {
         if (!hrAlertEnabled || state != TrackState.RUNNING) return;
-        boolean inZone = (bpm >= hrAlertMin && bpm <= hrAlertMax);
-        if (hrAlertTriggered && inZone) {
-            hrAlertTriggered = false;  // re-arm when back in zone
-            return;
-        }
-        if (!hrAlertTriggered && !inZone) {
-            hrAlertTriggered = true;
-            String alert = bpm < hrAlertMin
-                    ? str("Heart rate too low", "Пульс занадто низький", "Пульс слишком низкий")
-                    : str("Heart rate too high", "Пульс занадто високий", "Пульс слишком высокий");
-            speak(alert, true);  // urgent: bypass queue
+        boolean tooLow  = bpm < hrAlertMin;
+        boolean tooHigh = bpm > hrAlertMax;
+        boolean inZone  = !tooLow && !tooHigh;
+        long now = System.currentTimeMillis();
+
+        if (inZone) {
+            hrOutsideSinceMs = -1;
+            if (hrInsideSinceMs < 0) hrInsideSinceMs = now;
+            // Re-arm both alerts after sustained return to zone
+            if (now - hrInsideSinceMs >= HR_HYSTERESIS_MS) {
+                hrAlertLowFired  = false;
+                hrAlertHighFired = false;
+            }
+        } else {
+            hrInsideSinceMs = -1;
+            if (hrOutsideSinceMs < 0) hrOutsideSinceMs = now;
+            // Fire alert only after sustained breach
+            if (now - hrOutsideSinceMs >= HR_HYSTERESIS_MS) {
+                if (tooLow && !hrAlertLowFired) {
+                    hrAlertLowFired = true;
+                    speak(str("Heart rate too low. ", "Пульс занадто низький. ", "Пульс слишком низкий. ")
+                            + bpm, true);
+                } else if (tooHigh && !hrAlertHighFired) {
+                    hrAlertHighFired = true;
+                    speak(str("Heart rate too high. ", "Пульс занадто високий. ", "Пульс слишком высокий. ")
+                            + bpm, true);
+                }
+            }
         }
     }
 
@@ -647,7 +681,7 @@ public class SpeedometerService extends Service {
         metVolOnHr        = p.getBoolean("metro_vol_hr",       false);
         metHrMin          = p.getInt("metro_hr_min",           120);
         metHrMax          = p.getInt("metro_hr_max",           160);
-        metCadenceMinPct  = p.getInt("metro_cad_min_pct",      80);
+        metCadenceMinPct  = p.getInt("metro_cad_min_pct",      10);
         metSoundType   = p.getInt("metro_sound_type", MetronomeEngine.SOUND_MARACAS);
         metSoundStrong = p.getBoolean("metro_sound_strong", true);
         metSoundWeak   = p.getBoolean("metro_sound_weak", true);
@@ -762,18 +796,19 @@ public class SpeedometerService extends Service {
      * If metVolumeAdaptive is off → always FULL.
      */
     /**
-     * Adaptive volume: LOUD when cadence falls below threshold (= rider needs to
-     * pedal harder/faster), DIM (-18 dB) when cadence is at or above the threshold.
-     * Only active when metVolumeAdaptive = true.
-     * metCadenceMinPct: e.g. 80 means if rpm < 0.80 × metronomeBpm → FULL.
+     * Adaptive metronome volume.
+     * metCadenceMinPct = X (0–30): tolerance below target BPM.
+     * threshold = metronomeBpm × (1 − X/100)
+     *
+     * rpm < threshold  → cadence too low → FULL volume (alert rider).
+     * rpm ≥ threshold  → cadence OK      → DIM  volume (−18 dB, unobtrusive).
+     * No cadence signal → FULL (can't confirm target is met).
      */
     private void updateMetronomeVolume() {
         if (metronomeEngine == null) return;
         if (!metVolumeAdaptive) { metronomeEngine.setVolume(VOL_FULL); return; }
-        float rpm = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
-        float threshold = metronomeBpm * (metCadenceMinPct / 100f);
-        // Below threshold or no cadence signal → FULL (alert)
-        // At or above threshold → DIM (confirmation)
+        float rpm       = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
+        float threshold = metronomeBpm * (1f - metCadenceMinPct / 100f);
         boolean onTarget = (rpm > 0 && rpm >= threshold);
         metronomeEngine.setVolume(onTarget ? VOL_DIM : VOL_FULL);
     }
@@ -855,14 +890,23 @@ public class SpeedometerService extends Service {
         tts = new TextToSpeech(this, status -> {
             if (status != TextToSpeech.SUCCESS) return;
 
-            // Определяем язык системы и пробуем установить его в TTS
-            String sysLang = Locale.getDefault().getLanguage(); // "uk", "ru", "en", ...
+            // User-selected language overrides system locale.
+            // "auto" = detect from system locale (original behavior).
+            SharedPreferences prefs = getSharedPreferences("settings", MODE_PRIVATE);
+            String pref = prefs.getString("tts_lang", "auto");
+            String resolved;
+            if ("auto".equals(pref)) {
+                resolved = Locale.getDefault().getLanguage();
+            } else {
+                resolved = pref;  // "uk", "ru", or "en"
+            }
+
             Locale ttsLocale;
-            if ("uk".equals(sysLang)) {
-                ttsLocale = new Locale("uk");
+            if ("uk".equals(resolved)) {
+                ttsLocale = new Locale("uk", "UA");
                 lang = "uk";
-            } else if ("ru".equals(sysLang)) {
-                ttsLocale = new Locale("ru");
+            } else if ("ru".equals(resolved)) {
+                ttsLocale = new Locale("ru", "RU");
                 lang = "ru";
             } else {
                 ttsLocale = Locale.ENGLISH;
@@ -872,8 +916,7 @@ public class SpeedometerService extends Service {
             int result = tts.setLanguage(ttsLocale);
             if (result == TextToSpeech.LANG_MISSING_DATA
                     || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                // Запрошенный язык не установлен — откатываемся на английский
-                Log.w(TAG, "TTS: language " + ttsLocale + " not supported, falling back to EN");
+                Log.w(TAG, "TTS: " + ttsLocale + " not supported, falling back to EN");
                 lang = "en";
                 result = tts.setLanguage(Locale.ENGLISH);
             }
@@ -963,12 +1006,45 @@ public class SpeedometerService extends Service {
         return (float) Math.pow(10.0, dB / 20.0);
     }
 
-    private static String fmtDuration(long ms) {
-        long s = ms / 1000;
-        long h = s / 3600; s %= 3600;
-        long m = s / 60;   s %= 60;
-        if (h > 0) return String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s);
-        return String.format(java.util.Locale.US, "%d:%02d", m, s);
+    /**
+     * Format duration for TTS — avoids clock-notation which TTS reads as time-of-day.
+     * Returns natural-language string: "2 hours 5 minutes", "45 minutes 30 seconds", etc.
+     */
+    private String fmtDuration(long ms) {
+        long total = ms / 1000;
+        long h = total / 3600; total %= 3600;
+        long m = total / 60;
+        long s = total % 60;
+        StringBuilder sb = new StringBuilder();
+        if (h > 0) {
+            sb.append(h);
+            switch (lang) {
+                case "uk": sb.append(h == 1 ? " година" : " годин"); break;
+                case "ru": sb.append(h == 1 ? " час" : " часов"); break;
+                default:   sb.append(h == 1 ? " hour" : " hours"); break;
+            }
+        }
+        if (m > 0 || h > 0) {
+            if (sb.length() > 0) sb.append(" ");
+            sb.append(m);
+            switch (lang) {
+                case "uk": sb.append(m == 1 ? " хвилина" : " хвилин"); break;
+                case "ru": sb.append(m == 1 ? " минута" : " минут"); break;
+                default:   sb.append(m == 1 ? " minute" : " minutes"); break;
+            }
+        }
+        // Show seconds only when less than 5 minutes total
+        if (h == 0 && m < 5 && s > 0) {
+            if (sb.length() > 0) sb.append(" ");
+            sb.append(s);
+            switch (lang) {
+                case "uk": sb.append(s == 1 ? " секунда" : " секунд"); break;
+                case "ru": sb.append(s == 1 ? " секунда" : " секунд"); break;
+                default:   sb.append(s == 1 ? " second" : " seconds"); break;
+            }
+        }
+        if (sb.length() == 0) sb.append(str("0 minutes", "0 хвилин", "0 минут"));
+        return sb.toString();
     }
 
     private String fmtDist(float km) {
@@ -1059,6 +1135,14 @@ public class SpeedometerService extends Service {
         updateNotification(calculator.getSmoothedSpeed(),
                 calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg),
                 calculator.getTotalDistanceKm());
+    }
+
+    /** Call to switch TTS language immediately without restarting the ride. */
+    public void reinitTts() {
+        ttsReady = false;
+        if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
+        if (audioEnhancer != null) { audioEnhancer.cancel(); audioEnhancer = null; }
+        initTts();
     }
 
     /** Применяет новые настройки немедленно, не останавливая поездку. */
