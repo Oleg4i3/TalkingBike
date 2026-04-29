@@ -865,7 +865,10 @@ public class SpeedometerService extends Service {
         hrAlertEnabled = enabled;
         hrAlertMin     = min;
         hrAlertMax     = max;
-        hrAlertTriggered = false;
+        hrAlertLowFired  = false;
+        hrAlertHighFired = false;
+        hrOutsideSinceMs = -1;
+        hrInsideSinceMs  = -1;
         getSharedPreferences("settings", MODE_PRIVATE).edit()
                 .putBoolean("hr_alert_enabled", enabled)
                 .putInt("hr_alert_min", min)
