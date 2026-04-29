@@ -255,6 +255,20 @@
         </LinearLayout>
 
 
+        <!-- ═══ VOICE LANGUAGE ═══ -->
+        <TextView style="@style/SectionHeader" android:text="VOICE LANGUAGE"/>
+        <LinearLayout style="@style/Card" android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="TTS language" android:textColor="@color/colorText"
+                android:textSize="15sp"/>
+            <Spinner android:id="@+id/spinTtsLang"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:entries="@array/tts_lang_entries"
+                android:textColor="@color/colorText"/>
+        </LinearLayout>
+
         <!-- ═══ HEART RATE ═══ -->
         <TextView style="@style/SectionHeader" android:text="HEART RATE"/>
         <LinearLayout style="@style/Card" android:orientation="vertical">
@@ -380,10 +394,14 @@
                     android:textColor="@color/colorTextSecondary" android:textSize="13sp"
                     android:minWidth="200dp"/>
             </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="0% = always dim when on target   30% = generous tolerance"
+                android:textColor="@color/colorTextSecondary" android:textSize="11sp"
+                android:paddingBottom="2dp"/>
             <com.google.android.material.slider.Slider android:id="@+id/slCadMinPct"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:valueFrom="50" android:valueTo="100" android:stepSize="5"
-                android:value="80"
+                android:valueFrom="0" android:valueTo="30" android:stepSize="1"
+                android:value="10"
                 app:labelBehavior="floating"
                 app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"
                 android:layout_marginBottom="4dp"/>
