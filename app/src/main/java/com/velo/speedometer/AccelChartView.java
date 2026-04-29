@@ -77,6 +77,7 @@ public class AccelChartView extends View {
     private final Paint pSpeed      = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pSpeedFill  = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pHr        = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHrGrid    = new Paint();
     private final Paint pHrLabel   = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pLabelL     = new Paint(Paint.ANTI_ALIAS_FLAG); // accel axis
     private final Paint pLabelR     = new Paint(Paint.ANTI_ALIAS_FLAG); // cadence axis
@@ -149,6 +150,8 @@ public class AccelChartView extends View {
         pLabelS.setColor(0xFF3A7A3A); pLabelS.setTextSize(sp10);
         pHr.setColor(0xFFFF3333); pHr.setStyle(Paint.Style.STROKE);
         pHr.setStrokeWidth(2.2f); pHr.setStrokeJoin(Paint.Join.ROUND);
+        pHrGrid.setColor(0x44CC2222); pHrGrid.setStyle(Paint.Style.STROKE); pHrGrid.setStrokeWidth(1f);
+        pHrGrid.setPathEffect(new DashPathEffect(new float[]{6, 6}, 0));
         pHrLabel.setColor(0xFFCC2222); pHrLabel.setTextSize(sp10);
         pLive.setColor(0xFFFF6B35);   pLive.setTextSize(sp12); pLive.setFakeBoldText(true);
 
@@ -298,31 +301,49 @@ public class AccelChartView extends View {
         }
         canvas.drawPath(pathAccel, pAccel);
 
-        // Cadence path — split into stable/uncertain segments
+        // Cadence path:
+        // pCadUncert draws ALL points as a continuous dim line (uncertain/background).
+        // pCadStable draws ONLY stable points on top as bright segments.
+        // This way stable segments are always visible against the uncertain baseline.
         pathCadStable.reset(); pathCadUncert.reset();
-        boolean fs = true, fu = true;
         if (cadenceData != null) {
-            int ci = bsearch(cadenceData, startSec - 2f);
             synchronized (cadenceData) {
+                int ci = 0;
+                // binary search inside synchronized block to avoid race
+                {
+                    int lo = 0, hi = cadenceData.size()-1;
+                    float target = startSec - 2f;
+                    while (lo <= hi) {
+                        int mid = (lo+hi)>>>1;
+                        if (cadenceData.get(mid)[0] < target) lo = mid+1;
+                        else { ci = mid; hi = mid-1; }
+                    }
+                    if (cadenceData.size() > 0 && cadenceData.get(0)[0] >= target) ci = 0;
+                }
+                boolean fu = true, fs = true;
+                float prevX = 0, prevY = 0;
+                boolean prevStable = false;
                 for (int i = ci; i < cadenceData.size(); i++) {
                     float[] c = cadenceData.get(i);
                     if (c[0] > viewEndSec + 2f) break;
                     float x = tX(c[0], startSec, chartW);
                     float y = cadenceY(c[1], accelH);
-                    if (c[2] > 0.5f) {           // stable
-                        if (fs) { pathCadStable.moveTo(x, y); fs = false; }
-                        else      pathCadStable.lineTo(x, y);
-                        fu = true;               // break uncertain path
-                    } else {                     // uncertain
-                        if (fu) { pathCadUncert.moveTo(x, y); fu = false; }
-                        else      pathCadUncert.lineTo(x, y);
-                        fs = true;               // break stable path
+                    // Uncertain (background) line — always continuous
+                    if (fu) { pathCadUncert.moveTo(x, y); fu = false; }
+                    else      pathCadUncert.lineTo(x, y);
+                    // Stable line — only stable segments, starts fresh after gap
+                    if (c[2] > 0.5f) {
+                        if (fs || !prevStable) { pathCadStable.moveTo(x, y); fs = false; }
+                        else                     pathCadStable.lineTo(x, y);
+                    } else {
+                        fs = true; // break stable path on uncertain point
                     }
+                    prevX = x; prevY = y; prevStable = c[2] > 0.5f;
                 }
             }
         }
-        canvas.drawPath(pathCadStable, pCadStable);
-        canvas.drawPath(pathCadUncert, pCadUncert);
+        canvas.drawPath(pathCadUncert, pCadUncert);   // dim orange first
+        canvas.drawPath(pathCadStable, pCadStable);   // bright yellow on top
 
         // Left axis: accel labels
         canvas.drawText(fmt1(aHi),           4, pLabelL.getTextSize()+2, pLabelL);
@@ -403,11 +424,21 @@ public class AccelChartView extends View {
         canvas.drawText(fmt0((sLo+sHi)/2f),  4, speedH/2f,               pLabelS);
         canvas.drawText(fmt0(sLo),           4, speedH-4,                 pLabelS);
 
-        // HR axis labels (right)
-        canvas.drawText(Math.round(HR_HI)+" bpm", W-rightPx+2, pHrLabel.getTextSize()+2, pHrLabel);
-        canvas.drawText(Math.round((HR_LO+HR_HI)/2f)+"",       W-rightPx+2, speedH/2f,  pHrLabel);
-        canvas.drawText(Math.round(HR_LO)+"",                  W-rightPx+2, speedH-4,   pHrLabel);
+        // HR horizontal grid lines + right-axis labels
+        // Grid bpm values chosen to match standard HR training zones
+        float[] hrGridBpm = {HR_LO, 100f, 120f, 140f, 160f, 180f, HR_HI};
+        for (float bpm : hrGridBpm) {
+            if (bpm < HR_LO || bpm > HR_HI) continue;
+            float gy = speedH * (1f - (bpm - HR_LO) / (HR_HI - HR_LO));
+            canvas.drawLine(0, gy, chartW, gy, pHrGrid);
+            String lbl = Math.round(bpm) + "";
+            float ty = gy - 2f;
+            if (ty < pHrLabel.getTextSize() + 2) ty = pHrLabel.getTextSize() + 2;
+            if (ty > speedH - 2)                  ty = speedH - 2;
+            canvas.drawText(lbl, chartW + 2, ty, pHrLabel);
+        }
 
+        // Right axis separator
         canvas.drawLine(chartW, 0, chartW, speedH, pGrid);
 
         canvas.restore();

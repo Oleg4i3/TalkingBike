@@ -212,8 +212,18 @@ public class CadenceGraphActivity extends AppCompatActivity {
 
     // ── Sensor CSV: time + raw sensor magnitude ─────────────────────────────
     private void onSaveSensorUri(Uri uri) {
-        if (uri == null || detector == null) return;
-        List<float[]> src = detector.getRawSamples();
+        if (uri == null) return;
+        // detector may have been wired after ride started — get fresh reference
+        CadenceDetector det = (service != null) ? service.getCadenceDetector() : detector;
+        if (det == null) {
+            Toast.makeText(this, getString(R.string.csv_saved_error), Toast.LENGTH_LONG).show();
+            return;
+        }
+        List<float[]> src = det.getRawSamples();
+        if (src == null || src.isEmpty()) {
+            Toast.makeText(this, "No sensor data recorded yet", Toast.LENGTH_LONG).show();
+            return;
+        }
         final float[][] snap;
         synchronized (src) { snap = src.toArray(new float[0][]); }
         new Thread(() -> {
@@ -233,7 +243,8 @@ public class CadenceGraphActivity extends AppCompatActivity {
             bw.write("time_sec,sensor_mag");
             bw.newLine();
             for (float[] row : data) {
-                bw.write(String.format(Locale.US, "%.3f,%.5f", row[0], row[1]));
+                // Round to 1 decimal second, 4 decimal sensor
+                bw.write(String.format(Locale.US, "%.1f,%.4f", row[0], row[1]));
                 bw.newLine();
             }
             bw.flush();
@@ -288,7 +299,7 @@ public class CadenceGraphActivity extends AppCompatActivity {
                 while (ic  < cadence.length && cadence[ic][0]  <= t) { rpm = cadence[ic][1]; stable = cadence[ic][2]; ic++; }
                 while (is2 < speed.length   && speed[is2][0]   <= t) { spd = speed[is2][1]; is2++; }
                 while (ih  < hr.length      && hr[ih][0]        <= t) { hrBpm = hr[ih][1]; ih++; }
-                bw.write(String.format(Locale.US, "%.3f,%.2f,%.1f,%d,%d",
+                bw.write(String.format(Locale.US, "%.1f,%.2f,%.1f,%d,%d",
                         t, spd, rpm, (int) stable, (int) hrBpm));
                 bw.newLine();
             }

@@ -51,10 +51,9 @@ public class MainActivity extends AppCompatActivity
     private RadioGroup  rgMetSound;
     private com.google.android.material.button.MaterialButton btnMetronome;
     private com.google.android.material.button.MaterialButton btnExit;
-    private CheckBox    cbMetVolumeAdaptive, cbMetVolCadence, cbMetVolHr;
-    private com.google.android.material.slider.RangeSlider rsMetHrZone;
-    private TextView    tvHrZoneLabel;
+    private CheckBox    cbMetVolumeAdaptive;
     private TextView    tvHr;
+    private TextView    tvUnit;
     private boolean     metronomeUiReady = false;
     private static final long DBL = 500;
 
@@ -96,6 +95,7 @@ public class MainActivity extends AppCompatActivity
             else { finishAndRemoveTask(); }
         });
         tvHr             = findViewById(R.id.tvHr);
+        tvUnit           = findViewById(R.id.tvUnit);
 
         sbMetBpm.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean user) {
@@ -117,26 +117,8 @@ public class MainActivity extends AppCompatActivity
 
         // Adaptive volume widgets
         cbMetVolumeAdaptive = findViewById(R.id.cbMetVolumeAdaptive);
-        cbMetVolCadence     = findViewById(R.id.cbMetVolCadence);
-        cbMetVolHr          = findViewById(R.id.cbMetVolHr);
-        rsMetHrZone         = findViewById(R.id.rsMetHrZone);
-        tvHrZoneLabel       = findViewById(R.id.tvHrZoneLabel);
-
-        android.view.View.OnClickListener metVolListener = v -> pushMetVolParams();
-        if (cbMetVolumeAdaptive != null) cbMetVolumeAdaptive.setOnClickListener(metVolListener);
-        if (cbMetVolCadence     != null) cbMetVolCadence    .setOnClickListener(metVolListener);
-        if (cbMetVolHr          != null) cbMetVolHr         .setOnClickListener(metVolListener);
-
-        if (rsMetHrZone != null) {
-            rsMetHrZone.addOnChangeListener((slider, value, fromUser) -> {
-                if (!fromUser) return;
-                java.util.List<Float> vals = slider.getValues();
-                int lo = vals.get(0).intValue(), hi = vals.get(1).intValue();
-                if (tvHrZoneLabel != null)
-                    tvHrZoneLabel.setText("HR zone: " + lo + " – " + hi + " bpm");
-                pushMetVolParams();
-            });
-        }
+        if (cbMetVolumeAdaptive != null)
+            cbMetVolumeAdaptive.setOnClickListener(v -> pushMetVolParams());
 
         metronomeUiReady = true;
 
@@ -190,6 +172,7 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onSpeedUpdate(float speedKmh, float avgKmh, float distKm) {
         runOnUiThread(() -> {
+            if (tvUnit != null) tvUnit.setText("km/h");
             tvSpeed.setText(String.valueOf(Math.round(speedKmh)));
             tvStats.setText(String.format(Locale.US,
                     "Avg  %.0f km/h     %.2f km", avgKmh, distKm));
@@ -199,14 +182,9 @@ public class MainActivity extends AppCompatActivity
     private void pushMetVolParams() {
         if (!bound || !metronomeUiReady) return;
         boolean on  = cbMetVolumeAdaptive != null && cbMetVolumeAdaptive.isChecked();
-        boolean onC = cbMetVolCadence     != null && cbMetVolCadence    .isChecked();
-        boolean onH = cbMetVolHr          != null && cbMetVolHr         .isChecked();
-        int lo = 120, hi = 160;
-        if (rsMetHrZone != null) {
-            java.util.List<Float> v = rsMetHrZone.getValues();
-            lo = v.get(0).intValue(); hi = v.get(1).intValue();
-        }
-        service.setMetVolumeAdaptive(on, onC, onH, lo, hi);
+        int pct = getSharedPreferences("settings", MODE_PRIVATE)
+                .getInt("metro_cad_min_pct", 80);
+        service.setMetVolumeAdaptive(on, pct);
     }
 
     /** Push current UI state to service. */
@@ -236,16 +214,7 @@ public class MainActivity extends AppCompatActivity
         cbMetVibStrong  .setChecked(service.isMetVibStrong());
         cbMetVibWeak    .setChecked(service.isMetVibWeak());
         refreshMetronomeButton(service.isMetronomePlaying());
-        // Adaptive volume
         if (cbMetVolumeAdaptive != null) cbMetVolumeAdaptive.setChecked(service.isMetVolumeAdaptive());
-        if (cbMetVolCadence != null)     cbMetVolCadence    .setChecked(service.isMetVolOnCadence());
-        if (cbMetVolHr != null)          cbMetVolHr         .setChecked(service.isMetVolOnHr());
-        if (rsMetHrZone != null) {
-            rsMetHrZone.setValues((float) service.getMetHrMin(), (float) service.getMetHrMax());
-            if (tvHrZoneLabel != null)
-                tvHrZoneLabel.setText("HR zone: " + service.getMetHrMin()
-                        + " – " + service.getMetHrMax() + " bpm");
-        }
     }
 
     public void onMetMinus(android.view.View v) {
@@ -327,15 +296,16 @@ public class MainActivity extends AppCompatActivity
                 btnStart.setVisibility(View.VISIBLE);
                 llRunning.setVisibility(View.GONE);
                 tvPauseLabel.setVisibility(View.GONE);
-                tvSpeed.setText("0");
-                // tvStats intentionally NOT reset here —
-                // onRideFinished() will fill it with the final summary.
-                // On first launch (before any ride) it keeps the placeholder from XML.
+                // Ride emoji + water/snack reminder when idle
+                tvSpeed.setText("\uD83D\uDEB4");
+                if (tvUnit != null)
+                    tvUnit.setText("\uD83C\uDF4C  \uD83D\uDEB0  \uD83D\uDCA7");
                 break;
             case RUNNING:
                 btnStart.setVisibility(View.GONE);
                 llRunning.setVisibility(View.VISIBLE);
                 tvPauseLabel.setVisibility(View.GONE);
+                if (tvUnit != null) tvUnit.setText("km/h");
                 btnPause.setText(R.string.btn_pause);
                 btnPause.setBackgroundTintList(ContextCompat.getColorStateList(
                         this, R.color.colorButtonPause));

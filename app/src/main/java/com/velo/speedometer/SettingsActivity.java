@@ -34,8 +34,13 @@ public class SettingsActivity extends AppCompatActivity {
     private CheckBox cbScreenAnnounce, cbEnhancedAudio;
     private CheckBox cbCadence, cbExcludePauses;
     private CheckBox cbCadenceGyro, cbCadenceAcf;
-    // Heart Rate
+    // Heart Rate & Ride time & Cadence threshold
     private CheckBox   cbAnnounceHr;
+    private CheckBox   cbHrAlert;
+    private CheckBox   cbAnnounceRideTime;
+    private CheckBox   cbRideTimeExclPauses;
+    private com.google.android.material.slider.Slider slCadMinPct;
+    private int        hrMaxAge = 185;
     private com.google.android.material.slider.Slider slHrInterval;
     private android.widget.Button btnSelectHrDevice;
     private String     pendingHrAddress = null;
@@ -86,7 +91,11 @@ public class SettingsActivity extends AppCompatActivity {
         cbScreenAnnounce= findViewById(R.id.cbScreenAnnounce);
         cbEnhancedAudio = findViewById(R.id.cbEnhancedAudio);
         cbCadence        = findViewById(R.id.cbCadence);
-        cbAnnounceHr     = findViewById(R.id.cbAnnounceHr);
+        cbAnnounceHr         = findViewById(R.id.cbAnnounceHr);
+        cbHrAlert            = findViewById(R.id.cbHrAlert);
+        cbAnnounceRideTime   = findViewById(R.id.cbAnnounceRideTime);
+        cbRideTimeExclPauses = findViewById(R.id.cbRideTimeExclPauses);
+        slCadMinPct          = findViewById(R.id.slCadMinPct);
         slHrInterval     = findViewById(R.id.slHrInterval);
         btnSelectHrDevice = findViewById(R.id.btnSelectHrDevice);
         cbCadenceGyro = findViewById(R.id.cbCadenceGyro);
@@ -114,7 +123,11 @@ public class SettingsActivity extends AppCompatActivity {
         cbScreenAnnounce.setChecked(p.getBoolean("screen_announce",   true));
         cbEnhancedAudio .setChecked(p.getBoolean("enhanced_audio",    true));
         cbCadence    .setChecked(p.getBoolean("announce_cadence", false));
-        if (cbAnnounceHr  != null) cbAnnounceHr .setChecked(p.getBoolean("announce_hr", false));
+        if (cbAnnounceHr         != null) cbAnnounceHr        .setChecked(p.getBoolean("announce_hr", false));
+        if (cbHrAlert            != null) cbHrAlert           .setChecked(p.getBoolean("hr_alert_enabled", false));
+        if (cbAnnounceRideTime   != null) cbAnnounceRideTime  .setChecked(p.getBoolean("announce_ride_time", false));
+        if (cbRideTimeExclPauses != null) cbRideTimeExclPauses.setChecked(p.getBoolean("ride_time_excl_pauses", true));
+        if (slCadMinPct          != null) slCadMinPct         .setValue(p.getInt("metro_cad_min_pct", 80));
         if (slHrInterval  != null) {
             int raw = p.getInt("hr_interval_sec", 63);
             // Slider stepSize=7: value must be a multiple of 7 in [7,350]
@@ -176,7 +189,11 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("screen_announce",   cbScreenAnnounce.isChecked())
                 .putBoolean("enhanced_audio",    cbEnhancedAudio.isChecked())
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
-                .putBoolean("announce_hr",  cbAnnounceHr != null && cbAnnounceHr.isChecked())
+                .putBoolean("announce_hr",         cbAnnounceHr         != null && cbAnnounceHr        .isChecked())
+                .putBoolean("hr_alert_enabled",    cbHrAlert            != null && cbHrAlert           .isChecked())
+                .putBoolean("announce_ride_time",  cbAnnounceRideTime   != null && cbAnnounceRideTime  .isChecked())
+                .putBoolean("ride_time_excl_pauses",cbRideTimeExclPauses!= null && cbRideTimeExclPauses.isChecked())
+                .putInt("metro_cad_min_pct",       slCadMinPct          != null ? Math.round(slCadMinPct.getValue()) : 80)
                 .putInt("hr_interval_sec",  slHrInterval  != null ? Math.round(slHrInterval.getValue()) : 63)
                 .putString("hr_device_address", pendingHrAddress != null ? pendingHrAddress
                         : prefs().getString("hr_device_address", null))

@@ -142,7 +142,7 @@ public class SpeedometerService extends Service {
     private int                metHrMin          = 120;    // HR zone min
     private int                metHrMax          = 160;    // HR zone max
     private static final float VOL_FULL          = 1.0f;
-    private static final float VOL_DIM           = dBtoLinear(-12f);
+    private static final float VOL_DIM           = dBtoLinear(-18f);
     private MediaSessionCompat mediaSession;
 
     // ── Heart Rate Monitor ────────────────────────────────────────────────────
@@ -151,6 +151,19 @@ public class SpeedometerService extends Service {
     private boolean             doAnnounceHr      = false;
     private int                 hrIntervalSec     = 60;
     private Runnable            hrAnnounceRunnable;
+    private Runnable            cadenceRunnable;
+    private Runnable            rideTimeRunnable;
+    private boolean             doAnnounceRideTime  = false;
+    private boolean             rideTimeExcludePauses = false;
+    private int                 rideTimeIntervalMin = 5;
+    private boolean             resumedPending      = false;  // de-dup "resumed"
+    // HR zone alert
+    private boolean             hrAlertEnabled      = false;
+    private boolean             hrAlertTriggered    = false;  // one-shot flag
+    private int                 hrAlertMin          = 120;
+    private int                 hrAlertMax          = 160;
+    // Cadence volume threshold
+    private int                 metCadenceMinPct    = 80;     // % of metronomeBpm
     private final List<float[]> hrHistory = new ArrayList<>();  // [elapsed_s, bpm]
     private PowerManager.WakeLock metWakeLock;
 
@@ -168,6 +181,8 @@ public class SpeedometerService extends Service {
                     synchronized (hrHistory) { hrHistory.add(new float[]{elapsed, bpm}); }
                 }
                 if (listener != null) listener.onHrChanged(bpm, true);
+                // One-shot HR zone alert
+                checkHrAlert(bpm);
             }
             @Override public void onConnectionState(boolean connected) {
                 if (!connected) lastHrBpm = 0;
@@ -236,10 +251,14 @@ public class SpeedometerService extends Service {
         requestLocationUpdates();
         cadenceDetector.start();
         synchronized (hrHistory) { hrHistory.clear(); }
-        if (doAnnounceHr) scheduleHrTimer();
+        if (doAnnounceHr)       scheduleHrTimer();
         registerTorchListener();
         if (screenAnnounceEnabled) registerScreenReceiver();
-        if (doAnnounceAvg) scheduleAvgTimer();
+        if (doAnnounceAvg)      scheduleAvgTimer();
+        if (doAnnounceCadence)  scheduleCadenceTimer();
+        if (doAnnounceRideTime) scheduleRideTimeTimer();
+        resumedPending   = false;
+        hrAlertTriggered = false;
         speak(str("Let's go", "Поїхали", "Погнали"));
     }
 
@@ -251,6 +270,8 @@ public class SpeedometerService extends Service {
         if (locationManager != null) locationManager.removeUpdates(locationListener);
         cadenceDetector.stop();
         if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
+        if (cadenceRunnable    != null) handler.removeCallbacks(cadenceRunnable);
+        if (rideTimeRunnable   != null) handler.removeCallbacks(rideTimeRunnable);
         if (avgRunnable != null)     handler.removeCallbacks(avgRunnable);
         unregisterTorchListener();
         unregisterScreenReceiver();
@@ -296,11 +317,16 @@ public class SpeedometerService extends Service {
             slowStartMs = -1;
             notifyStateChanged();
             lastAnyAnnounceMs = System.currentTimeMillis();
-            if (doAnnounceAvg) scheduleAvgTimer();
+            if (doAnnounceAvg)      scheduleAvgTimer();
+            if (doAnnounceCadence)  scheduleCadenceTimer();
+            if (doAnnounceRideTime) scheduleRideTimeTimer();
             updateNotification(calculator.getSmoothedSpeed(),
                     calculator.getAverageSpeed(avgPeriodMin, excludePausesFromAvg),
                     calculator.getTotalDistanceKm());
-            speak(str("Resumed", "Знову їдемо", "Продолжаем"));
+            if (!resumedPending) {
+                resumedPending = true;
+                speak(str("Resumed", "Знову їдемо", "Продолжаем"));
+            }
         }
     }
 
@@ -367,6 +393,7 @@ public class SpeedometerService extends Service {
             }
 
             if (state != TrackState.RUNNING) return;
+            resumedPending = false;  // confirmed moving again
 
             if (autoPauseEnabled) {
                 if (speed < 3f) {
@@ -509,9 +536,64 @@ public class SpeedometerService extends Service {
         }
     }
 
+    // ── Independent cadence announce timer ──────────────────────────────────────
+    private void scheduleCadenceTimer() {
+        if (cadenceRunnable != null) handler.removeCallbacks(cadenceRunnable);
+        cadenceRunnable = new Runnable() {
+            @Override public void run() {
+                if (state == TrackState.RUNNING) {
+                    CadenceDetector.Result r = lastCadenceResult;
+                    if (r != null && r.rpm > 0) {
+                        speak(str("Cadence ", "Каденс ", "Каденс ")
+                                + Math.round(r.rpm));
+                    }
+                    if (doAnnounceCadence)
+                        handler.postDelayed(this, (long) avgIntervalMin * 60_000L);
+                }
+            }
+        };
+        handler.postDelayed(cadenceRunnable, (long) avgIntervalMin * 60_000L);
+    }
+
+    // ── Independent ride-time announce timer ─────────────────────────────────
+    private void scheduleRideTimeTimer() {
+        if (rideTimeRunnable != null) handler.removeCallbacks(rideTimeRunnable);
+        rideTimeRunnable = new Runnable() {
+            @Override public void run() {
+                if (state == TrackState.RUNNING) {
+                    long activeMs = rideStartMs > 0
+                            ? (System.currentTimeMillis() - rideStartMs
+                               - (rideTimeExcludePauses ? totalPauseMs : 0L))
+                            : 0L;
+                    speak(str("Time ", "Час ", "Время ")
+                            + fmtDuration(Math.max(0, activeMs)));
+                    if (doAnnounceRideTime)
+                        handler.postDelayed(this, (long) rideTimeIntervalMin * 60_000L);
+                }
+            }
+        };
+        handler.postDelayed(rideTimeRunnable, (long) rideTimeIntervalMin * 60_000L);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Heart Rate
     // ═══════════════════════════════════════════════════════════════════════════
+
+    private void checkHrAlert(int bpm) {
+        if (!hrAlertEnabled || state != TrackState.RUNNING) return;
+        boolean inZone = (bpm >= hrAlertMin && bpm <= hrAlertMax);
+        if (hrAlertTriggered && inZone) {
+            hrAlertTriggered = false;  // re-arm when back in zone
+            return;
+        }
+        if (!hrAlertTriggered && !inZone) {
+            hrAlertTriggered = true;
+            String alert = bpm < hrAlertMin
+                    ? str("Heart rate too low", "Пульс занадто низький", "Пульс слишком низкий")
+                    : str("Heart rate too high", "Пульс занадто високий", "Пульс слишком высокий");
+            speak(alert, true);  // urgent: bypass queue
+        }
+    }
 
     private void scheduleHrTimer() {
         if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
@@ -565,6 +647,7 @@ public class SpeedometerService extends Service {
         metVolOnHr        = p.getBoolean("metro_vol_hr",       false);
         metHrMin          = p.getInt("metro_hr_min",           120);
         metHrMax          = p.getInt("metro_hr_max",           160);
+        metCadenceMinPct  = p.getInt("metro_cad_min_pct",      80);
         metSoundType   = p.getInt("metro_sound_type", MetronomeEngine.SOUND_MARACAS);
         metSoundStrong = p.getBoolean("metro_sound_strong", true);
         metSoundWeak   = p.getBoolean("metro_sound_weak", true);
@@ -678,37 +761,21 @@ public class SpeedometerService extends Service {
      * Either condition that is active and whose checkbox is ticked → FULL.
      * If metVolumeAdaptive is off → always FULL.
      */
+    /**
+     * Adaptive volume: LOUD when cadence falls below threshold (= rider needs to
+     * pedal harder/faster), DIM (-18 dB) when cadence is at or above the threshold.
+     * Only active when metVolumeAdaptive = true.
+     * metCadenceMinPct: e.g. 80 means if rpm < 0.80 × metronomeBpm → FULL.
+     */
     private void updateMetronomeVolume() {
         if (metronomeEngine == null) return;
         if (!metVolumeAdaptive) { metronomeEngine.setVolume(VOL_FULL); return; }
-
-        boolean triggerCadence = false;
-        boolean triggerHr      = false;
-
-        if (metVolOnCadence) {
-            float rpm = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
-            if (rpm > 0) {
-                float ratio = rpm / metronomeBpm;
-                // metronomeBpm = cadence RPM target, so compare directly
-                triggerCadence = (ratio >= 0.80f && ratio <= 1.20f);
-            }
-        }
-
-        if (metVolOnHr) {
-            triggerHr = (lastHrBpm > 0
-                    && lastHrBpm >= metHrMin && lastHrBpm <= metHrMax);
-        }
-
-        // "anyTrigger" = both enabled conditions are satisfied simultaneously.
-        // One checkbox: anyTrigger = that single condition.
-        // Two checkboxes: anyTrigger = cadence AND hr both OK (de Morgan:
-        //   NOT anyTrigger = at least one is off-target → FULL volume).
-        boolean anyTrigger = triggerCadence || triggerHr;
-        if (metVolOnCadence && metVolOnHr) anyTrigger = triggerCadence && triggerHr;
-
-        // FULL  when at least one parameter is off-target → reminds rider to adjust.
-        // DIM   when all active parameters are on-target  → confirms correct effort.
-        metronomeEngine.setVolume(anyTrigger ? VOL_DIM : VOL_FULL);
+        float rpm = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
+        float threshold = metronomeBpm * (metCadenceMinPct / 100f);
+        // Below threshold or no cadence signal → FULL (alert)
+        // At or above threshold → DIM (confirmation)
+        boolean onTarget = (rpm > 0 && rpm >= threshold);
+        metronomeEngine.setVolume(onTarget ? VOL_DIM : VOL_FULL);
     }
 
     public void stopMetronome() {
@@ -745,25 +812,35 @@ public class SpeedometerService extends Service {
     public boolean isMetVolumeAdaptive() { return metVolumeAdaptive; }
     public boolean isMetVolOnCadence()   { return metVolOnCadence; }
     public boolean isMetVolOnHr()        { return metVolOnHr; }
+    public int     getMetCadenceMinPct() { return metCadenceMinPct; }
     public int     getMetHrMin()         { return metHrMin; }
     public int     getMetHrMax()         { return metHrMax; }
 
-    public void setMetVolumeAdaptive(boolean on, boolean onCadence, boolean onHr,
-                                     int hrMin, int hrMax) {
+    public void setMetVolumeAdaptive(boolean on, int cadMinPct) {
         metVolumeAdaptive = on;
-        metVolOnCadence   = onCadence;
-        metVolOnHr        = onHr;
-        metHrMin          = hrMin;
-        metHrMax          = hrMax;
+        metCadenceMinPct  = cadMinPct;
         getSharedPreferences("settings", MODE_PRIVATE).edit()
-                .putBoolean("metro_vol_adaptive", on)
-                .putBoolean("metro_vol_cadence",  onCadence)
-                .putBoolean("metro_vol_hr",        onHr)
-                .putInt("metro_hr_min",            hrMin)
-                .putInt("metro_hr_max",            hrMax)
+                .putBoolean("metro_vol_adaptive",  on)
+                .putInt("metro_cad_min_pct",       cadMinPct)
                 .apply();
         if (!on) metronomeEngine.setVolume(VOL_FULL);
     }
+
+    public void setHrAlert(boolean enabled, int min, int max) {
+        hrAlertEnabled = enabled;
+        hrAlertMin     = min;
+        hrAlertMax     = max;
+        hrAlertTriggered = false;
+        getSharedPreferences("settings", MODE_PRIVATE).edit()
+                .putBoolean("hr_alert_enabled", enabled)
+                .putInt("hr_alert_min", min)
+                .putInt("hr_alert_max", max)
+                .apply();
+    }
+
+    public boolean isHrAlertEnabled() { return hrAlertEnabled; }
+    public int     getHrAlertMin()    { return hrAlertMin; }
+    public int     getHrAlertMax()    { return hrAlertMax; }
     public boolean isMetSoundStrong(){ return metSoundStrong; }
     public boolean isMetSoundWeak()  { return metSoundWeak; }
     public boolean isMetVibStrong()  { return metVibStrong; }
@@ -809,39 +886,41 @@ public class SpeedometerService extends Service {
     }
 
     /**
-     * Speak text.
-     * @param queued  true = QUEUE_ADD (enqueue after current utterance, used for
-     *                HR announcements so they don't interrupt speed/avg).
-     *                false = QUEUE_FLUSH (interrupt and speak immediately).
+     * Enqueue speech. All normal announcements use QUEUE_ADD so they never
+     * interrupt each other — timers simply add to the TTS queue.
+     * Pass urgent=true ONLY for immediate alerts (HR zone breach) which
+     * use QUEUE_FLUSH and bypass the queue entirely.
      */
     private void speak(String text) { speak(text, false); }
 
-    private void speak(String text, boolean queued) {
+    private void speak(String text, boolean urgent) {
         if (!ttsReady || tts == null) return;
-        if (state == TrackState.PAUSED) return;
-
-        if (!queued && audioEnhancer != null) audioEnhancer.cancel();
+        if (!urgent && state == TrackState.PAUSED) return;
 
         lastTorchMs = System.currentTimeMillis();
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         boolean screenOff = pm != null && !pm.isInteractive();
 
-        int queueMode = queued ? TextToSpeech.QUEUE_ADD : TextToSpeech.QUEUE_FLUSH;
-
-        if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
-            if (!queued) audioEnhancer.speak(text, null);
-            // For queued HR when screen is off: use standard TTS after enhancer finishes
-            // (AudioEnhancer has no queue API, so fall through to TTS for queued)
-            else {
-                Bundle params = new Bundle();
-                params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
-                tts.speak(text, TextToSpeech.QUEUE_ADD, params, "sb_hr");
+        if (urgent) {
+            // Urgent alert: cancel queue and speak immediately
+            if (audioEnhancer != null) audioEnhancer.cancel();
+            if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
+                audioEnhancer.speak(text, null);
+            } else {
+                Bundle p = new Bundle();
+                p.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, p, "sb_urgent");
             }
         } else {
-            Bundle params = new Bundle();
-            params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
-            tts.speak(text, queueMode, params, queued ? "sb_hr" : "sb");
+            // Normal: enqueue — independent timers don't interrupt each other
+            if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
+                audioEnhancer.speak(text, null);
+            } else {
+                Bundle p = new Bundle();
+                p.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+                tts.speak(text, TextToSpeech.QUEUE_ADD, p, "sb");
+            }
         }
     }
 
@@ -1001,6 +1080,10 @@ public class SpeedometerService extends Service {
         // Reschedule HR timer
         if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
         if (doAnnounceHr && state == TrackState.RUNNING) scheduleHrTimer();
+        if (cadenceRunnable  != null) handler.removeCallbacks(cadenceRunnable);
+        if (doAnnounceCadence && state == TrackState.RUNNING) scheduleCadenceTimer();
+        if (rideTimeRunnable != null) handler.removeCallbacks(rideTimeRunnable);
+        if (doAnnounceRideTime && state == TrackState.RUNNING) scheduleRideTimeTimer();
 
         // Остальное только если поездка активна
         if (state == TrackState.STOPPED) return;
@@ -1039,6 +1122,12 @@ public class SpeedometerService extends Service {
         doAnnounceHr             = p.getBoolean("announce_hr",            false);
         hrIntervalSec            = p.getInt("hr_interval_sec",           63);
         excludePausesFromAvg     = p.getBoolean("exclude_pauses_from_avg", false);
+        doAnnounceRideTime       = p.getBoolean("announce_ride_time",     false);
+        rideTimeExcludePauses    = p.getBoolean("ride_time_excl_pauses",  true);
+        rideTimeIntervalMin      = p.getInt("ride_time_interval_min",     5);
+        hrAlertEnabled           = p.getBoolean("hr_alert_enabled",       false);
+        hrAlertMin               = p.getInt("hr_alert_min",              120);
+        hrAlertMax               = p.getInt("hr_alert_max",              160);
         if (audioEnhancer != null) audioEnhancer.setGainDb(gainDb);
     }
 
