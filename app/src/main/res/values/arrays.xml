@@ -5,4 +5,11 @@
         <item>120</item>
         <item>160</item>
     </array>
+    <!-- TTS language picker -->
+    <string-array name="tts_lang_entries">
+        <item>Auto (system)</item>
+        <item>English</item>
+        <item>Українська</item>
+        <item>Русский</item>
+    </string-array>
 </resources>
