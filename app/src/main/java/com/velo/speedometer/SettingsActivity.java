@@ -40,6 +40,8 @@ public class SettingsActivity extends AppCompatActivity {
     private CheckBox   cbAnnounceRideTime;
     private CheckBox   cbRideTimeExclPauses;
     private com.google.android.material.slider.Slider slCadMinPct;
+    private com.google.android.material.slider.RangeSlider rsHrZone;
+    private TextView tvHrZoneLabel;
     private int        hrMaxAge = 185;
     private com.google.android.material.slider.Slider slHrInterval;
     private android.widget.Button btnSelectHrDevice;
@@ -96,6 +98,16 @@ public class SettingsActivity extends AppCompatActivity {
         cbAnnounceRideTime   = findViewById(R.id.cbAnnounceRideTime);
         cbRideTimeExclPauses = findViewById(R.id.cbRideTimeExclPauses);
         slCadMinPct          = findViewById(R.id.slCadMinPct);
+        rsHrZone             = findViewById(R.id.rsHrZone);
+        tvHrZoneLabel        = findViewById(R.id.tvHrZoneLabel);
+        if (rsHrZone != null) {
+            rsHrZone.addOnChangeListener((slider, value, fromUser) -> {
+                if (!fromUser || tvHrZoneLabel == null) return;
+                java.util.List<Float> v = slider.getValues();
+                tvHrZoneLabel.setText("Target HR zone: " + v.get(0).intValue()
+                        + " – " + v.get(1).intValue() + " bpm  (max 185)");
+            });
+        }
         slHrInterval     = findViewById(R.id.slHrInterval);
         btnSelectHrDevice = findViewById(R.id.btnSelectHrDevice);
         cbCadenceGyro = findViewById(R.id.cbCadenceGyro);
@@ -125,6 +137,18 @@ public class SettingsActivity extends AppCompatActivity {
         cbCadence    .setChecked(p.getBoolean("announce_cadence", false));
         if (cbAnnounceHr         != null) cbAnnounceHr        .setChecked(p.getBoolean("announce_hr", false));
         if (cbHrAlert            != null) cbHrAlert           .setChecked(p.getBoolean("hr_alert_enabled", false));
+        if (rsHrZone != null) {
+            int lo = p.getInt("hr_alert_min", 120);
+            int hi = p.getInt("hr_alert_max", 160);
+            // Snap to stepSize=5
+            lo = Math.round(lo / 5f) * 5;
+            hi = Math.round(hi / 5f) * 5;
+            lo = Math.max(40, Math.min(lo, 195));
+            hi = Math.max(lo + 5, Math.min(hi, 200));
+            rsHrZone.setValues((float) lo, (float) hi);
+            if (tvHrZoneLabel != null)
+                tvHrZoneLabel.setText("Target HR zone: " + lo + " – " + hi + " bpm  (max 185)");
+        }
         if (cbAnnounceRideTime   != null) cbAnnounceRideTime  .setChecked(p.getBoolean("announce_ride_time", false));
         if (cbRideTimeExclPauses != null) cbRideTimeExclPauses.setChecked(p.getBoolean("ride_time_excl_pauses", true));
         if (slCadMinPct          != null) slCadMinPct         .setValue(p.getInt("metro_cad_min_pct", 80));
@@ -191,6 +215,8 @@ public class SettingsActivity extends AppCompatActivity {
                 .putBoolean("announce_cadence",       cbCadence      .isChecked())
                 .putBoolean("announce_hr",         cbAnnounceHr         != null && cbAnnounceHr        .isChecked())
                 .putBoolean("hr_alert_enabled",    cbHrAlert            != null && cbHrAlert           .isChecked())
+                .putInt("hr_alert_min", rsHrZone != null && !rsHrZone.getValues().isEmpty() ? rsHrZone.getValues().get(0).intValue() : 120)
+                .putInt("hr_alert_max", rsHrZone != null && rsHrZone.getValues().size() > 1  ? rsHrZone.getValues().get(1).intValue() : 160)
                 .putBoolean("announce_ride_time",  cbAnnounceRideTime   != null && cbAnnounceRideTime  .isChecked())
                 .putBoolean("ride_time_excl_pauses",cbRideTimeExclPauses!= null && cbRideTimeExclPauses.isChecked())
                 .putInt("metro_cad_min_pct",       slCadMinPct          != null ? Math.round(slCadMinPct.getValue()) : 80)
