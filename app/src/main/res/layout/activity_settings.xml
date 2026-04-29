@@ -290,14 +290,32 @@
                     app:labelBehavior="floating"
                     app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"/>
             </LinearLayout>
-            <!-- HR alert: one-shot out-of-zone urgent announce -->
+            <!-- HR target zone: RangeSlider min/max + one-shot alert -->
+            <TextView android:id="@+id/tvHrZoneLabel"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Target HR zone: 120 – 160 bpm  (max 185)"
+                android:textColor="@color/colorTextSecondary" android:textSize="13sp"
+                android:paddingTop="10dp" android:paddingBottom="2dp"/>
+
+            <com.google.android.material.slider.RangeSlider
+                android:id="@+id/rsHrZone"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:valueFrom="40" android:valueTo="200"
+                android:stepSize="5"
+                app:values="@array/hr_zone_defaults"
+                app:thumbColor="@color/colorAccent"
+                app:trackColorActive="#FF3333"
+                app:trackColorInactive="@color/colorDivider"
+                android:layout_marginBottom="6dp"/>
+
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:gravity="center_vertical" android:orientation="horizontal"
-                android:paddingTop="8dp">
+                android:paddingBottom="4dp">
                 <CheckBox android:id="@+id/cbHrAlert"
                     android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:buttonTint="@color/colorAccent"
-                    android:text="Urgent alert when HR exits target zone (one-shot)"
+                    android:text="Urgent voice alert when HR exits target zone (one-shot)"
                     android:textColor="@color/colorText" android:textSize="13sp"/>
             </LinearLayout>
         </LinearLayout>
