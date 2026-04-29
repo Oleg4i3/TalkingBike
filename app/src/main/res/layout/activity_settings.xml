@@ -290,6 +290,37 @@
                     app:labelBehavior="floating"
                     app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"/>
             </LinearLayout>
+            <!-- HR alert: one-shot out-of-zone urgent announce -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal"
+                android:paddingTop="8dp">
+                <CheckBox android:id="@+id/cbHrAlert"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Urgent alert when HR exits target zone (one-shot)"
+                    android:textColor="@color/colorText" android:textSize="13sp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+
+        <!-- ═══ RIDE TIME ═══ -->
+        <TextView style="@style/SectionHeader" android:text="RIDE TIME"/>
+        <LinearLayout style="@style/Card" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <CheckBox android:id="@+id/cbAnnounceRideTime"
+                    android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Announce ride time"
+                    android:textColor="@color/colorText" android:textSize="15sp"/>
+                <CheckBox android:id="@+id/cbRideTimeExclPauses"
+                    android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:checked="true"
+                    android:buttonTint="@color/colorAccent"
+                    android:text="Exclude stops"
+                    android:textColor="@color/colorTextSecondary" android:textSize="13sp"/>
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ═══ CADENCE ═══ -->
@@ -323,6 +354,21 @@
                     android:textColor="@color/colorTextSecondary" android:textSize="13sp"
                     android:checked="true"/>
             </LinearLayout>
+            <!-- Metronome dim threshold -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal" android:paddingTop="8dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Metronome dims above (% of BPM):"
+                    android:textColor="@color/colorTextSecondary" android:textSize="13sp"
+                    android:minWidth="200dp"/>
+            </LinearLayout>
+            <com.google.android.material.slider.Slider android:id="@+id/slCadMinPct"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:valueFrom="50" android:valueTo="100" android:stepSize="5"
+                android:value="80"
+                app:labelBehavior="floating"
+                app:thumbColor="@color/colorAccent" app:trackColorActive="@color/colorAccent"
+                android:layout_marginBottom="4dp"/>
         </LinearLayout>
 
         <!-- ═══ ADVANCED ═══ -->
