@@ -120,36 +120,37 @@ public class MetronomeEngine {
         return makeStaticTrack(buf);
     }
 
-    /** Maracas: filtered noise burst. Strong = full noise, Weak = low-passed smooth. */
+    /** * Maracas: высокочастотный шум с перкуссионной огибающей и эффектом "дробинок". 
+     */
     private static void fillMaracas(float[] buf, boolean strong) {
         int n = buf.length;
-        double attackEnd = n * 0.4;
-        if (strong) {
-            for (int i = 0; i < n; i++) {
-                float noise    = (float)(Math.random() * 2 - 1);
-                float envelope = i < attackEnd
-                        ? (float)(i / attackEnd)
-                        : (float)(1.0 - (i - attackEnd) / (n - attackEnd));
-                buf[i] = noise * envelope;
-            }
-        } else {
-            // 15-tap moving-average smoothing → softer timbre
-            float[] hist = new float[15];
-            int   hidx = 0;
-            float sum  = 0f;
-            for (int i = 0; i < n; i++) {
-                float noise = (float)(Math.random() * 2 - 1);
-                float envelope = i < attackEnd
-                        ? (float)(i / attackEnd)
-                        : (float)(1.0 - (i - attackEnd) / (n - attackEnd));
-                sum -= hist[hidx];
-                hist[hidx] = noise;
-                sum += noise;
-                hidx = (hidx + 1) % 15;
-                float s = (sum / 15f) * 3f;
-                s = Math.max(-1f, Math.min(1f, s));
-                buf[i] = s * envelope * 0.4f;
-            }
+        float prevNoise = 0f;
+        float prevHp = 0f;
+        
+        // Настройки для сильной и слабой доли
+        float alpha = strong ? 0.65f : 0.55f; // Коэффициент High-Pass фильтра
+        double peakTime = strong ? 0.015 : 0.010; // Время максимальной громкости (атака)
+        float vol = strong ? 1.0f : 0.6f;
+
+        for (int i = 0; i < n; i++) {
+            double t = (double) i / SAMPLE_RATE;
+            
+            // 1. Генерация сырого шума
+            float noise = (float)(Math.random() * 2.0 - 1.0);
+            
+            // 2. High-Pass фильтр (срезаем низы)
+            float hpNoise = alpha * (prevHp + noise - prevNoise);
+            prevNoise = noise;
+            prevHp = hpNoise;
+            
+            // 3. Перкуссионная огибающая (форма Gamma распределения)
+            double envelope = (t / peakTime) * Math.exp(1.0 - t / peakTime);
+            if (envelope < 0.001) envelope = 0.0;
+            
+            // 4. Легкая амплитудная модуляция (~80 Гц) для имитации дребезга
+            float rattle = 0.85f + 0.15f * (float)Math.sin(2.0 * Math.PI * 80.0 * t);
+            
+            buf[i] = hpNoise * (float)envelope * rattle * vol;
         }
     }
 
@@ -167,15 +168,40 @@ public class MetronomeEngine {
         }
     }
 
-    /** Beep: decaying sine. Strong = 1000 Hz, Weak = 800 Hz (major third). */
+    /** * Деревянная Кукушка: синусоида с нечетными гармониками, глиссандо и мягкой атакой. 
+     */
     private static void fillBeep(float[] buf, boolean strong) {
-        double freq = strong ? 1000.0 : 800.0;
-        float  vol  = strong ? 0.8f   : 0.5f;
+        double baseFreq = strong ? 800.0 : 640.0;
+        float vol = strong ? 0.8f : 0.5f;
+        
+        double phase = 0.0;
+        
         for (int i = 0; i < buf.length; i++) {
-            double t        = (double) i / SAMPLE_RATE;
-            float  envelope = (float) Math.exp(-t * 40.0);
-            if (envelope < 0.001f) continue;
-            buf[i] = (float)(Math.sin(2.0 * Math.PI * freq * t)) * envelope * vol;
+            double t = (double) i / SAMPLE_RATE;
+            
+            // Огибающая: плавная атака + экспоненциальный спад
+            double attack = 1.0 - Math.exp(-t * 250.0);
+            double decay = Math.exp(-t * 20.0);
+            double envelope = attack * decay;
+            
+            if (envelope < 0.001) continue;
+            
+            // Pitch Glide: стартуем на 25% выше и падаем до базовой частоты
+            double currentFreq = baseFreq * (1.0 + 0.25 * Math.exp(-t * 80.0));
+            phase += 2.0 * Math.PI * currentFreq / SAMPLE_RATE;
+            
+            // Формирование тембра: основной тон + нечетные гармоники (деревянная трубка)
+            float fundamental = (float) Math.sin(phase);
+            float thirdHarm = (float) Math.sin(3.0 * phase) * 0.3f;
+            float fifthHarm = (float) Math.sin(5.0 * phase) * 0.1f;
+            
+            // "Chiff" - короткий шумовой всплеск на атаке (дыхание/механика)
+            float airChiff = (float)(Math.random() * 2.0 - 1.0) * (float)Math.exp(-t * 800.0) * 0.2f;
+            
+            // Микшируем и чуть приглушаем общий уровень, чтобы не было клиппинга
+            float sample = (fundamental + thirdHarm + fifthHarm + airChiff) * 0.75f;
+            
+            buf[i] = sample * (float)envelope * vol;
         }
     }
 
