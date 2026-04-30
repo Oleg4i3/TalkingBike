@@ -147,8 +147,8 @@ public class MetronomeEngine {
             double envelope = (t / peakTime) * Math.exp(1.0 - t / peakTime);
             if (envelope < 0.001) envelope = 0.0;
             
-            // 4. Легкая амплитудная модуляция (~70 Гц) для имитации дребезга
-            float rattle = 0.85f + 0.55f * (float)Math.sin(2.0 * Math.PI * 70.0 * t);
+            // 4. Легкая амплитудная модуляция (~80 Гц) для имитации дребезга
+            float rattle = 0.85f + 0.45f * (float)Math.sin(2.0 * Math.PI * 80.0 * t);
             
             buf[i] = hpNoise * (float)envelope * rattle * vol;
         }
@@ -171,7 +171,7 @@ public class MetronomeEngine {
    /**
      * Акустическая деревянная кукушка (имитация механизма старых ходиков).
      * Основана на физической модели закрытой трубы (stopped pipe) и меха.
-     */
+    
     private static void fillBeep(float[] buf, boolean strong) {
         // Классический интервал кукушки — мажорная терция.
         // Верхняя нота (Ку) ~ 659 Гц, нижняя (ку) ~ 523 Гц.
@@ -213,6 +213,59 @@ public class MetronomeEngine {
             float sample = (fundamental + h2 + h3 + h5 + chiff) * 0.85f;
             
             buf[i] = sample * (float)envelope * vol;
+        }
+    }
+*/
+
+    /**
+     * Акустическая деревянная кукушка.
+     * С выраженным шумом мехов ("вздохом") в начале.
+     */
+    private static void fillBeep(float[] buf, boolean strong) {
+        double baseFreq = strong ? 659.25 : 523.25;
+        float vol = strong ? 0.9f : 0.7f;
+        
+        double phase = 0.0;
+        float prevNoise = 0f; // Переменная для фильтра "воздуха"
+        
+        for (int i = 0; i < buf.length; i++) {
+            double t = (double) i / SAMPLE_RATE;
+            
+            // 1. Огибающая трубы
+            double attack = Math.min(1.0, t / 0.02); // 20мс на раздув
+            double release = Math.max(0.0, 1.0 - Math.max(0.0, t - 0.08) / 0.05);
+            double pipeEnvelope = attack * release;
+            
+            // Если и труба, и шум затухли — пропускаем вычисления
+            if (pipeEnvelope < 0.001 && t > 0.15) continue; 
+            
+            // 2. Генерация тона (закрытая труба)
+            double currentFreq = baseFreq * (1.0 + 0.015 * release);
+            phase += 2.0 * Math.PI * currentFreq / SAMPLE_RATE;
+            
+            float fundamental = (float) Math.sin(phase);
+            float h2 = (float) Math.sin(2.0 * phase) * 0.02f;
+            float h3 = (float) Math.sin(3.0 * phase) * 0.15f;
+            float h5 = (float) Math.sin(5.0 * phase) * 0.05f;
+            
+            // Смешиваем тон и применяем к нему огибающую трубы
+            float toneSample = (fundamental + h2 + h3 + h5) * (float)pipeEnvelope;
+            
+            // 3. "Вздох кукушки" (Chiff / Air)
+            float rawNoise = (float)(Math.random() * 2.0 - 1.0);
+            // Простейший Low-Pass фильтр: срезает "песок", оставляет густой "пшшш"
+            // Чем меньше коэффициент (0.15f), тем глуше звук воздуха
+            prevNoise += 0.15f * (rawNoise - prevNoise); 
+            
+            // Независимая огибающая для шума: стартует сразу (1.0) и затухает за ~50-60 мс
+            double noiseEnvelope = Math.exp(-t * 35.0); 
+            
+            // Формируем вздох (0.4f - это громкость "пшшш", можете увеличить, если нужно больше)
+            float airSigh = prevNoise * (float)noiseEnvelope * 0.4f;
+            
+            // 4. Итоговый микс (Тон + Воздух)
+            // Умножаем на 0.8f, чтобы избежать перегруза (клиппинга) при сложении
+            buf[i] = (toneSample + airSigh) * 0.8f * vol;
         }
     }
     
