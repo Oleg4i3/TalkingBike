@@ -232,7 +232,7 @@ public class MetronomeEngine {
             double t = (double) i / SAMPLE_RATE;
             
             // 1. Огибающая трубы
-            double attack = Math.min(1.0, t / 0.02); // 20мс на раздув
+            double attack = Math.min(1.0, t / 0.03); // 30мс на раздув
             double release = Math.max(0.0, 1.0 - Math.max(0.0, t - 0.08) / 0.05);
             double pipeEnvelope = attack * release;
             
@@ -245,7 +245,7 @@ public class MetronomeEngine {
             
             float fundamental = (float) Math.sin(phase);
             float h2 = (float) Math.sin(2.0 * phase) * 0.02f;
-            float h3 = (float) Math.sin(3.0 * phase) * 0.15f;
+            float h3 = (float) Math.sin(3.0 * phase) * 0.18f;
             float h5 = (float) Math.sin(5.0 * phase) * 0.05f;
             
             // Смешиваем тон и применяем к нему огибающую трубы
@@ -254,14 +254,14 @@ public class MetronomeEngine {
             // 3. "Вздох кукушки" (Chiff / Air)
             float rawNoise = (float)(Math.random() * 2.0 - 1.0);
             // Простейший Low-Pass фильтр: срезает "песок", оставляет густой "пшшш"
-            // Чем меньше коэффициент (0.15f), тем глуше звук воздуха
-            prevNoise += 0.15f * (rawNoise - prevNoise); 
+            // Чем меньше коэффициент (0.1f), тем глуше звук воздуха
+            prevNoise += 0.1f * (rawNoise - prevNoise); 
             
             // Независимая огибающая для шума: стартует сразу (1.0) и затухает за ~50-60 мс
-            double noiseEnvelope = Math.exp(-t * 35.0); 
+            double noiseEnvelope = Math.exp(-t * 25.0); 
             
-            // Формируем вздох (0.4f - это громкость "пшшш", можете увеличить, если нужно больше)
-            float airSigh = prevNoise * (float)noiseEnvelope * 0.4f;
+            // Формируем вздох (0.5f - это громкость "пшшш", можете увеличить, если нужно больше)
+            float airSigh = prevNoise * (float)noiseEnvelope * 0.5f;
             
             // 4. Итоговый микс (Тон + Воздух)
             // Умножаем на 0.8f, чтобы избежать перегруза (клиппинга) при сложении
