@@ -176,7 +176,7 @@
             <RadioButton android:id="@+id/rbMetBeep"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Beep" android:textColor="@color/colorTextSecondary"
+                android:text="Cuckoo" android:textColor="@color/colorTextSecondary"
                 android:textSize="12sp" android:buttonTint="@color/colorAccent"/>
         </RadioGroup>
 
