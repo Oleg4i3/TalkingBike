@@ -256,10 +256,17 @@ public class CadenceGraphActivity extends AppCompatActivity {
     private void onSaveRideUri(Uri uri) {
         if (uri == null) return;
 
+        // Always get the CURRENT detector from service — it may have been
+        // recreated by reloadSettings(), making the local `detector` field stale.
+        CadenceDetector freshDet = (service != null)
+                ? service.getCadenceDetector() : detector;
+
         final float[][] cadence, speed, hr;
-        if (detector != null) {
-            List<float[]> c = detector.getCadenceHistory();
-            synchronized (c) { cadence = c.toArray(new float[0][]); }
+        if (freshDet != null) {
+            List<float[]> c = freshDet.getCadenceHistory();
+            if (c != null && !c.isEmpty()) {
+                synchronized (c) { cadence = c.toArray(new float[0][]); }
+            } else { cadence = new float[0][]; }
         } else { cadence = new float[0][]; }
         if (service != null) {
             List<float[]> sp = service.getSpeedHistory();

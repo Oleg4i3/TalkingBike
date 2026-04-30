@@ -554,7 +554,7 @@ public class SpeedometerService extends Service {
                 if (state == TrackState.RUNNING) {
                     CadenceDetector.Result r = lastCadenceResult;
                     if (r != null && r.rpm > 0) {
-                        speak(str("Cadence ", "Каденс ", "Каденс ")
+                        speak(str("Cadence ", "Каденс ", "Круть ")
                                 + Math.round(r.rpm));
                     }
                     if (doAnnounceCadence)
@@ -990,7 +990,7 @@ public class SpeedometerService extends Service {
         if (!doAnnounceCadence) return s;
         CadenceDetector.Result r = lastCadenceResult;
         if (r.stable && r.rpm > 0f) {
-            s += ". " + str("Cadence ", "Каденс ", "Каданс ") + Math.round(r.rpm);
+            s += ". " + str("Cadence ", "Каденс ", "Круть ") + Math.round(r.rpm);
         } else if (r.stableAvgRpm > 0f) {
             // Unstable right now but have recent history — announce average
             s += ". " + str("Cadence approx ", "Каденс приблизно ", "Каданс примерно ")
@@ -1059,10 +1059,19 @@ public class SpeedometerService extends Service {
                 default:   return String.format(Locale.US, "%.0f meters", km * 1000);
             }
         }
+        // Always use Locale.US for formatting, then replace "." → "," for ru/uk
+        // so TTS reads "1,5 километров" not "1.5" (which sounds like "one point five"
+        // or worse, "one. End of sentence. Five kilometers").
+        String s;
         switch (lang) {
-            case "uk": return String.format(Locale.getDefault(), "%.1f кілометрів", km);
-            case "ru": return String.format(Locale.getDefault(), "%.1f километров", km);
-            default:   return String.format(Locale.US, "%.1f kilometers", km);
+            case "uk":
+                s = String.format(Locale.US, "%.1f кілометрів", km);
+                return s.replace(".", ",");
+            case "ru":
+                s = String.format(Locale.US, "%.1f километров", km);
+                return s.replace(".", ",");
+            default:
+                return String.format(Locale.US, "%.1f kilometers", km);
         }
     }
 
