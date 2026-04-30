@@ -147,8 +147,8 @@ public class MetronomeEngine {
             double envelope = (t / peakTime) * Math.exp(1.0 - t / peakTime);
             if (envelope < 0.001) envelope = 0.0;
             
-            // 4. Легкая амплитудная модуляция (~80 Гц) для имитации дребезга
-            float rattle = 0.85f + 0.45f * (float)Math.sin(2.0 * Math.PI * 80.0 * t);
+            // 4. Легкая амплитудная модуляция (~90 Гц) для имитации дребезга
+            float rattle = 0.85f + 0.35f * (float)Math.sin(2.0 * Math.PI * 90.0 * t) * (float)Math.sin(2.0 * Math.PI * 77.0 * t);
             
             buf[i] = hpNoise * (float)envelope * rattle * vol;
         }
@@ -260,8 +260,8 @@ public class MetronomeEngine {
             // Независимая огибающая для шума: стартует сразу (1.0) и затухает за ~50-60 мс
             double noiseEnvelope = Math.exp(-t * 25.0); 
             
-            // Формируем вздох (0.5f - это громкость "пшшш", можете увеличить, если нужно больше)
-            float airSigh = prevNoise * (float)noiseEnvelope * 0.5f;
+            // Формируем вздох (0.8f - это громкость "пшшш", можете увеличить, если нужно больше)
+            float airSigh = prevNoise * (float)noiseEnvelope * 0.8f;
             
             // 4. Итоговый микс (Тон + Воздух)
             // Умножаем на 0.8f, чтобы избежать перегруза (клиппинга) при сложении
