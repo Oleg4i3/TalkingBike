@@ -618,7 +618,7 @@ public class SpeedometerService extends Service {
             if (now - hrOutsideSinceMs >= HR_HYSTERESIS_MS) {
                 if (tooLow && !hrAlertLowFired) {
                     hrAlertLowFired = true;
-                    speak(str("Heart rate too low. ", "Пульс занадто низький. ", "Пульс слишком низкий. ")
+                    speak(str("Heart rate too low. ", "Пульс нижче цільвого. ", "Пульс ниже цели. ")
                             + bpm, true);
                 } else if (tooHigh && !hrAlertHighFired) {
                     hrAlertHighFired = true;
@@ -993,11 +993,11 @@ public class SpeedometerService extends Service {
             s += ". " + str("Cadence ", "Каденс ", "Круть ") + Math.round(r.rpm);
         } else if (r.stableAvgRpm > 0f) {
             // Unstable right now but have recent history — announce average
-            s += ". " + str("Cadence approx ", "Каденс приблизно ", "Каданс примерно ")
+            s += ". " + str("Cadence approx ", "Каденс приблизно ", "Круть около ")
                  + Math.round(r.stableAvgRpm);
         } else if (r.rpm > 0f) {
             // Detected something but not confident
-            s += ". " + str("Cadence unstable", "Каденс нестабільний", "Каданс нестабильный");
+            s += ". " + str("Cadence unstable", "Каденс нестабільний", "Частота педалирования нестабильная");
         }
         if (doAnnounceHr && lastHrBpm > 0)
             s += ". " + str("Heart ", "Пульс ", "Пульс ") + lastHrBpm;
