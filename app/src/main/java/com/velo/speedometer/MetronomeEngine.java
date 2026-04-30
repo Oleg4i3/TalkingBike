@@ -147,8 +147,8 @@ public class MetronomeEngine {
             double envelope = (t / peakTime) * Math.exp(1.0 - t / peakTime);
             if (envelope < 0.001) envelope = 0.0;
             
-            // 4. Легкая амплитудная модуляция (~80 Гц) для имитации дребезга
-            float rattle = 0.85f + 0.55f * (float)Math.sin(2.0 * Math.PI * 40.0 * t);
+            // 4. Легкая амплитудная модуляция (~70 Гц) для имитации дребезга
+            float rattle = 0.85f + 0.55f * (float)Math.sin(2.0 * Math.PI * 70.0 * t);
             
             buf[i] = hpNoise * (float)envelope * rattle * vol;
         }
@@ -168,85 +168,54 @@ public class MetronomeEngine {
         }
     }
 
-    /** * Деревянная Кукушка: синусоида с нечетными гармониками, глиссандо и мягкой атакой. 
-     */
-    /** * Механическая Кукушка: мягкий звук деревянной трубы из старых настенных часов. 
+   /**
+     * Акустическая деревянная кукушка (имитация механизма старых ходиков).
+     * Основана на физической модели закрытой трубы (stopped pipe) и меха.
      */
     private static void fillBeep(float[] buf, boolean strong) {
-        // Базовые частоты ниже: 650 Hz (Ку) и 520 Hz (ку) — мажорная терция
-        double baseFreq = strong ? 650.0 : 520.0;
-        float vol = strong ? 0.9f : 0.6f;
+        // Классический интервал кукушки — мажорная терция.
+        // Верхняя нота (Ку) ~ 659 Гц, нижняя (ку) ~ 523 Гц.
+        double baseFreq = strong ? 659.25 : 523.25;
+        float vol = strong ? 0.9f : 0.7f;
         
         double phase = 0.0;
         
         for (int i = 0; i < buf.length; i++) {
             double t = (double) i / SAMPLE_RATE;
             
-            // Огибающая: мягкий старт мехов (~20мс) и долгое, спокойное затухание
-            double attack = 1.0 - Math.exp(-t * 120.0); 
-            double decay = Math.exp(-t * 12.0);         
-            double envelope = attack * decay;
+            // 1. Огибающая трубы (Trapezoid / ADSR), а не струны (Exponential)!
+            // Воздух из мехов дует ровно, а потом мех закрывается.
+            double attack = Math.min(1.0, t / 0.02); // 20мс на раздув (нарастание давления)
+            
+            // Мех сдувается примерно на 80мс и клапан полностью закрывается к 130мс
+            double release = Math.max(0.0, 1.0 - Math.max(0.0, t - 0.08) / 0.05);
+            
+            // Перемножая их, получаем трапецию: / \
+            double envelope = attack * release;
             
             if (envelope < 0.001) continue;
             
-            // Микро-спад частоты в начале (всего 2% вместо 25%), как при падении давления в мехе
-            double currentFreq = baseFreq * (1.0 + 0.02 * Math.exp(-t * 50.0));
+            // Микро-падение давления к концу звучания (частота съезжает вниз всего на 1-1.5% по мере сдутия меха)
+            double currentFreq = baseFreq * (1.0 + 0.015 * release);
             phase += 2.0 * Math.PI * currentFreq / SAMPLE_RATE;
             
-            // Тело звука: 
-            // 1. Основа
-            // 2. 2-я гармоника (октава) для деревянной "теплоты"
-            // 3. 3-я гармоника для легкой "пустотности" трубы
+            // 2. Спектр закрытой деревянной трубы (Gedackt pipe).
+            // Доминируют нечетные гармоники (3, 5), четные почти отсутствуют.
             float fundamental = (float) Math.sin(phase);
-            float secondHarm = (float) Math.sin(2.0 * phase) * 0.15f;
-            float thirdHarm = (float) Math.sin(3.0 * phase) * 0.05f;
+            float h2 = (float) Math.sin(2.0 * phase) * 0.02f; // Едва уловимая 2-я (для "деревянности")
+            float h3 = (float) Math.sin(3.0 * phase) * 0.15f; // Сильная 3-я (характерная "пустота" закрытой трубы)
+            float h5 = (float) Math.sin(5.0 * phase) * 0.05f; // Легкая 5-я
             
-            // Chiff: мягкий шум воздуха в самом начале (дыхание меха)
-            float airChiff = (float)(Math.random() * 2.0 - 1.0) * (float)Math.exp(-t * 400.0) * 0.08f;
+            // 3. "Chiff" - акустический шум при рассекании воздуха о кромку свистка в первые миллисекунды
+            float chiff = (float)(Math.random() * 2.0 - 1.0) * (float)Math.exp(-t * 250.0) * 0.1f;
             
-            // Микшируем с запасом от клиппинга
-            float sample = (fundamental + secondHarm + thirdHarm + airChiff) * 0.8f;
+            // Миксуем все компоненты
+            float sample = (fundamental + h2 + h3 + h5 + chiff) * 0.85f;
             
             buf[i] = sample * (float)envelope * vol;
         }
     }
-  /** * old variant  
-  private static void fillBeep(float[] buf, boolean strong) {
-        double baseFreq = strong ? 800.0 : 640.0;
-        float vol = strong ? 0.8f : 0.5f;
-        
-        double phase = 0.0;
-        
-        for (int i = 0; i < buf.length; i++) {
-            double t = (double) i / SAMPLE_RATE;
-            
-            // Огибающая: плавная атака + экспоненциальный спад
-            double attack = 1.0 - Math.exp(-t * 250.0);
-            double decay = Math.exp(-t * 20.0);
-            double envelope = attack * decay;
-            
-            if (envelope < 0.001) continue;
-            
-            // Pitch Glide: стартуем на 25% выше и падаем до базовой частоты
-            double currentFreq = baseFreq * (1.0 + 0.25 * Math.exp(-t * 80.0));
-            phase += 2.0 * Math.PI * currentFreq / SAMPLE_RATE;
-            
-            // Формирование тембра: основной тон + нечетные гармоники (деревянная трубка)
-            float fundamental = (float) Math.sin(phase);
-            float thirdHarm = (float) Math.sin(3.0 * phase) * 0.3f;
-            float fifthHarm = (float) Math.sin(5.0 * phase) * 0.1f;
-            
-            // "Chiff" - короткий шумовой всплеск на атаке (дыхание/механика)
-            float airChiff = (float)(Math.random() * 2.0 - 1.0) * (float)Math.exp(-t * 800.0) * 0.2f;
-            
-            // Микшируем и чуть приглушаем общий уровень, чтобы не было клиппинга
-            float sample = (fundamental + thirdHarm + fifthHarm + airChiff) * 0.75f;
-            
-            buf[i] = sample * (float)envelope * vol;
-        }
-    }
-    */
-
+    
     /** 1-second silent loop — keeps USAGE_MEDIA focus alive for MediaSession. */
     private static AudioTrack buildSilentTrack() {
         float[] silence = new float[SAMPLE_RATE];
