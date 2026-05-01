@@ -618,7 +618,7 @@ public class SpeedometerService extends Service {
             if (now - hrOutsideSinceMs >= HR_HYSTERESIS_MS) {
                 if (tooLow && !hrAlertLowFired) {
                     hrAlertLowFired = true;
-                    speak(str("Heart rate too low. ", "Пульс нижче цільвого. ", "Пульс ниже цели. ")
+                    speak(str("Heart rate too low. ", "Пульс нижче цільового значення. ", "Пульс ниже цели. ")
                             + bpm, true);
                 } else if (tooHigh && !hrAlertHighFired) {
                     hrAlertHighFired = true;
