@@ -471,9 +471,21 @@ public class MainActivity extends AppCompatActivity
         if (hasPermission()) {
             bindService();
             requestNotifPermission();
+            requestStoragePermission();
         } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{ Manifest.permission.ACCESS_FINE_LOCATION }, PERM);
+        }
+    }
+
+    /** WRITE_EXTERNAL_STORAGE нужен только на API 24-28 для лога в Downloads. */
+    private void requestStoragePermission() {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                ContextCompat.checkSelfPermission(this,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{ Manifest.permission.WRITE_EXTERNAL_STORAGE }, 102);
         }
     }
 
@@ -497,6 +509,8 @@ public class MainActivity extends AppCompatActivity
                 && r[0] == PackageManager.PERMISSION_GRANTED) {
             bindService();
             requestNotifPermission();
+            requestStoragePermission();
         }
+        // 102 = WRITE_EXTERNAL_STORAGE — сервис использует разрешение сам
     }
 }

@@ -631,60 +631,123 @@ public class SpeedometerService extends Service {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Ride Log (FIX #5)
+    // Ride Log
+    // Файл: Downloads/VeloSpeedometer/ride_log.csv  (виден в файловом менеджере)
+    // API 29+: MediaStore (разрешения не нужны)
+    // API 24-28: прямой путь (нужен WRITE_EXTERNAL_STORAGE, запрашивается в MainActivity)
+    // Внутренний кэш в getFilesDir() — резервная копия истории.
     // ═══════════════════════════════════════════════════════════════════════════
 
+    private static final String LOG_DIR  = "VeloSpeedometer";
+    private static final String LOG_NAME = "ride_log.csv";
+
     /**
-     * Appends one ride record to ride_log.csv in the app's internal files dir.
-     * Format: date_iso,dist_km,duration_sec,avg_kmh
-     * Called from stopTracking() after the ride ends.
+     * Добавляет запись о поездке во внутренний кэш и перезаписывает публичный файл.
+     * Вызывается из stopTracking() сразу после остановки поездки.
      */
     private void saveRideLog(float distKm, long activeMs, float avgKmh) {
-        if (distKm < 0.01f) return;   // ignore accidental zero-length rides
-        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
-        try {
-            boolean needHeader = !logFile.exists() || logFile.length() == 0;
-            FileWriter fw = new FileWriter(logFile, true);
-            PrintWriter pw = new PrintWriter(fw);
-            if (needHeader) {
-                pw.println("date,dist_km,duration_sec,avg_kmh");
-            }
-            String date = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(new Date());
-            long durationSec = activeMs / 1000L;
-            pw.printf(Locale.US, "%s,%.3f,%d,%.2f%n", date, distKm, durationSec, avgKmh);
-            pw.flush();
-            pw.close();
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to write ride log", e);
+        if (distKm < 0.01f) return;
+
+        // 1. Читаем существующие строки из внутреннего кэша
+        File cache = new File(getFilesDir(), LOG_NAME);
+        List<String> lines = new ArrayList<>();
+        if (cache.exists()) {
+            try (BufferedReader br = new BufferedReader(new FileReader(cache))) {
+                String l; while ((l = br.readLine()) != null) lines.add(l);
+            } catch (IOException ignored) {}
+        }
+        if (lines.isEmpty()) lines.add("date,dist_km,duration_sec,avg_kmh");
+
+        // 2. Добавляем новую запись
+        String date = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(new Date());
+        lines.add(String.format(Locale.US, "%s,%.3f,%d,%.2f",
+                date, distKm, activeMs / 1000L, avgKmh));
+
+        // 3. Сохраняем во внутренний кэш
+        try (PrintWriter pw = new PrintWriter(new FileWriter(cache, false))) {
+            for (String l : lines) pw.println(l);
+        } catch (IOException e) { Log.e(TAG, "saveRideLog cache", e); }
+
+        // 4. Перезаписываем публичный файл
+        String csv = android.text.TextUtils.join("
+", lines) + "
+";
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            saveLogMediaStore(csv);
+        } else {
+            saveLogLegacy(csv);
         }
     }
 
-    /**
-     * Reads the full ride log and returns lines (excluding header).
-     * Each String[] has: [date, dist_km, duration_sec, avg_kmh].
-     */
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
+    private void saveLogMediaStore(String csv) {
+        android.content.ContentResolver cr = getContentResolver();
+        android.net.Uri col = android.provider.MediaStore.Downloads.getContentUri(
+                android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        // Удаляем старый файл
+        String rel = android.os.Environment.DIRECTORY_DOWNLOADS
+                + java.io.File.separator + LOG_DIR + java.io.File.separator;
+        cr.delete(col,
+                android.provider.MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+                + android.provider.MediaStore.MediaColumns.RELATIVE_PATH + "=?",
+                new String[]{ LOG_NAME, rel });
+        // Создаём новый
+        android.content.ContentValues cv = new android.content.ContentValues();
+        cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, LOG_NAME);
+        cv.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv");
+        cv.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS
+                + java.io.File.separator + LOG_DIR);
+        android.net.Uri uri = cr.insert(col, cv);
+        if (uri == null) { Log.e(TAG, "saveLogMediaStore: null uri"); return; }
+        try (java.io.OutputStream os = cr.openOutputStream(uri)) {
+            if (os != null) os.write(csv.getBytes("UTF-8"));
+        } catch (IOException e) { Log.e(TAG, "saveLogMediaStore write", e); }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void saveLogLegacy(String csv) {
+        File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS), LOG_DIR);
+        if (!dir.exists()) dir.mkdirs();
+        try (PrintWriter pw = new PrintWriter(new FileWriter(new File(dir, LOG_NAME), false))) {
+            pw.print(csv);
+        } catch (IOException e) { Log.e(TAG, "saveLogLegacy", e); }
+    }
+
+    /** Читает историю из внутреннего кэша. */
     public List<String[]> readRideLog() {
         List<String[]> rows = new ArrayList<>();
-        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
-        if (!logFile.exists()) return rows;
-        try (BufferedReader br = new BufferedReader(new FileReader(logFile))) {
-            String line;
-            boolean first = true;
+        File cache = new File(getFilesDir(), LOG_NAME);
+        if (!cache.exists()) return rows;
+        try (BufferedReader br = new BufferedReader(new FileReader(cache))) {
+            String line; boolean first = true;
             while ((line = br.readLine()) != null) {
-                if (first) { first = false; continue; } // skip header
+                if (first) { first = false; continue; }
                 String[] parts = line.split(",", -1);
                 if (parts.length >= 4) rows.add(parts);
             }
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to read ride log", e);
-        }
+        } catch (IOException e) { Log.e(TAG, "readRideLog", e); }
         return rows;
     }
 
-    /** Delete all ride log entries. */
+    /** Очищает внутренний кэш и публичный файл. */
     public void clearRideLog() {
-        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
-        if (logFile.exists()) logFile.delete();
+        new File(getFilesDir(), LOG_NAME).delete();
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            android.content.ContentResolver cr = getContentResolver();
+            android.net.Uri col = android.provider.MediaStore.Downloads.getContentUri(
+                    android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            String rel = android.os.Environment.DIRECTORY_DOWNLOADS
+                    + java.io.File.separator + LOG_DIR + java.io.File.separator;
+            cr.delete(col,
+                    android.provider.MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+                    + android.provider.MediaStore.MediaColumns.RELATIVE_PATH + "=?",
+                    new String[]{ LOG_NAME, rel });
+        } else {
+            new File(android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), LOG_DIR + "/" + LOG_NAME).delete();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
