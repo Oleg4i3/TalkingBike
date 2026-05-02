@@ -669,9 +669,7 @@ public class SpeedometerService extends Service {
         } catch (IOException e) { Log.e(TAG, "saveRideLog cache", e); }
 
         // 4. Перезаписываем публичный файл
-        String csv = android.text.TextUtils.join("
-", lines) + "
-";
+        String csv = android.text.TextUtils.join("\n", lines) + "\n";
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             saveLogMediaStore(csv);
         } else {
