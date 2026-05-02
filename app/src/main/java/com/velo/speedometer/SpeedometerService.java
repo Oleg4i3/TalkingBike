@@ -36,7 +36,15 @@ import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import androidx.media.VolumeProviderCompat;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -54,6 +62,9 @@ public class SpeedometerService extends Service {
     public static final String ACTION_RIDE_STOPPED     = "sb.RIDE_STOPPED";
     public static final String ACTION_METRO_TOGGLE    = "sb.METRO_TOGGLE";
     public static final String ACTION_EXIT            = "sb.EXIT";
+
+    /** File name for persistent ride log (in getFilesDir()). */
+    public static final String RIDE_LOG_FILENAME = "ride_log.csv";
 
     private final IBinder binder = new LocalBinder();
     public class LocalBinder extends Binder {
@@ -103,6 +114,8 @@ public class SpeedometerService extends Service {
         /** Called once when ride stops. Shows final summary in UI. */
         default void onRideFinished(float avgKmh, float distKm, String timeStr) {}
         default void onHrChanged(int bpm, boolean connected) {}
+        /** Called when HR sensor battery level is read after connection. */
+        default void onHrBattery(int percent) {}
     }
 
     private float   speedThresholdKmh;
@@ -141,13 +154,21 @@ public class SpeedometerService extends Service {
     private boolean            metVolOnHr        = false;  // boost on HR in zone
     private int                metHrMin          = 120;    // HR zone min
     private int                metHrMax          = 160;    // HR zone max
-    private static final float VOL_FULL          = 1.0f;
-    private static final float VOL_DIM           = dBtoLinear(-18f);
+
+    // FIX #7: 3-level adaptive volume
+    // -18 dB  if cadence >= metronomeBpm  (on-target or above)
+    // -12 dB  if cadence is within the tolerance band below target
+    //   0 dB  if cadence is below (metronomeBpm * (1 - pct/100))
+    private static final float VOL_FULL  = 1.0f;
+    private static final float VOL_MID   = dBtoLinear(-12f);
+    private static final float VOL_DIM   = dBtoLinear(-18f);
+
     private MediaSessionCompat mediaSession;
 
     // ── Heart Rate Monitor ────────────────────────────────────────────────────
     private HeartRateMonitor    heartRateMonitor;
     private volatile int        lastHrBpm         = 0;
+    private volatile int        lastHrBattery     = -1;   // -1 = not read yet
     private boolean             doAnnounceHr      = false;
     private int                 hrIntervalSec     = 60;
     private Runnable            hrAnnounceRunnable;
@@ -194,6 +215,14 @@ public class SpeedometerService extends Service {
                 if (!connected) lastHrBpm = 0;
                 if (listener != null) listener.onHrChanged(lastHrBpm, connected);
             }
+            // FIX #6: battery level — announce via TTS and forward to UI
+            @Override public void onBatteryLevel(int percent) {
+                lastHrBattery = percent;
+                if (listener != null) listener.onHrBattery(percent);
+                // Announce battery level via TTS when sensor first connects
+                speak(str("Heart rate sensor battery ", "Батарея датчика пульсу ", "Батарея датчика пульса ")
+                        + percent + "%");
+            }
         });
         // Auto-connect to saved device on service start
         String savedAddr = getSharedPreferences("settings", MODE_PRIVATE)
@@ -229,6 +258,8 @@ public class SpeedometerService extends Service {
     public CadenceDetector   getCadenceDetector()  { return cadenceDetector; }
     public HeartRateMonitor  getHeartRateMonitor() { return heartRateMonitor; }
     public int               getLastHrBpm()        { return lastHrBpm; }
+    /** Returns last read battery level of HR sensor, -1 if not yet available. */
+    public int               getLastHrBattery()    { return lastHrBattery; }
     public List<float[]>     getHrHistory()        { return hrHistory; }
     /** Speed history since ride start — synchronize on the returned list to iterate. */
     public java.util.List<float[]> getSpeedHistory() { return speedHistory; }
@@ -256,7 +287,8 @@ public class SpeedometerService extends Service {
         }
 
         requestLocationUpdates();
-        cadenceDetector.start();
+        // FIX #1+#2: pass rideStartMs so sensor and GPS timestamps share the same origin
+        cadenceDetector.start(rideStartMs);
         synchronized (hrHistory) { hrHistory.clear(); }
         if (doAnnounceHr)       scheduleHrTimer();
         registerTorchListener();
@@ -294,6 +326,9 @@ public class SpeedometerService extends Service {
                 ? (System.currentTimeMillis() - rideStartMs - totalPauseMs)
                 : 0L;
         String timeStr  = fmtDuration(Math.max(0, activeMs));
+
+        // FIX #5: save ride to persistent log file
+        saveRideLog(finalDist, activeMs, finalAvg);
 
         if (listener != null) {
             listener.onSpeedUpdate(0, finalAvg, finalDist);
@@ -340,6 +375,10 @@ public class SpeedometerService extends Service {
         }
     }
 
+    /**
+     * FIX #4: Screen-on announce now always includes ride time when the ride is active.
+     * Previously announceNow only announced speed/avg/distance.
+     */
     public void announceNow(boolean includeCurrentSpeed) {
         if (!ttsReady) return;
         long now = System.currentTimeMillis();
@@ -359,6 +398,14 @@ public class SpeedometerService extends Service {
         if (doAnnounceDistance)
             sb.append(str("Distance ", "Дистанція ", "Дистанция "))
               .append(fmtDist(dist)).append(". ");
+
+        // Ride time — always included in screen-on/torch announce when ride is active
+        if (includeCurrentSpeed && state == TrackState.RUNNING && rideStartMs > 0) {
+            long activeMs = System.currentTimeMillis() - rideStartMs
+                    - (rideTimeExcludePauses ? totalPauseMs : 0L);
+            sb.append(str("Time ", "Час ", "Время "))
+              .append(fmtDuration(Math.max(0, activeMs))).append(". ");
+        }
 
         if (sb.length() > 0) {
             speak(sb.toString().trim());
@@ -396,21 +443,19 @@ public class SpeedometerService extends Service {
 
             if (listener != null) listener.onSpeedUpdate(speed, avg, dist);
 
-            // Авто-возобновление — проверяем ДО раннего выхода по PAUSED,
-            // но только если пауза была выставлена автоматически.
             if (autoPaused && state == TrackState.PAUSED && speed > 6f) {
-                togglePause();   // togglePause сбросит autoPaused и уведомит UI
+                togglePause();
             }
 
             if (state != TrackState.RUNNING) return;
-            resumedPending = false;  // confirmed moving again
+            resumedPending = false;
 
             if (autoPauseEnabled) {
                 if (speed < 3f) {
                     if (slowStartMs < 0) slowStartMs = now;
                     else if ((now - slowStartMs) > (long) autoPauseSec * 1000L) {
                         slowStartMs = -1;
-                        autoPause();   // объявляет и ставит авто-паузу
+                        autoPause();
                         return;
                     }
                 } else {
@@ -586,16 +631,66 @@ public class SpeedometerService extends Service {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Heart Rate
+    // Ride Log (FIX #5)
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * HR zone alert with 10-second hysteresis on both entry and exit.
-     *
-     * BREACH: alert fires only after HR has been outside zone for ≥10 s continuously.
-     * RE-ARM: alert re-arms only after HR has been back inside zone for ≥10 s.
-     * Each boundary (low/high) tracked independently.
+     * Appends one ride record to ride_log.csv in the app's internal files dir.
+     * Format: date_iso,dist_km,duration_sec,avg_kmh
+     * Called from stopTracking() after the ride ends.
      */
+    private void saveRideLog(float distKm, long activeMs, float avgKmh) {
+        if (distKm < 0.01f) return;   // ignore accidental zero-length rides
+        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
+        try {
+            boolean needHeader = !logFile.exists() || logFile.length() == 0;
+            FileWriter fw = new FileWriter(logFile, true);
+            PrintWriter pw = new PrintWriter(fw);
+            if (needHeader) {
+                pw.println("date,dist_km,duration_sec,avg_kmh");
+            }
+            String date = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(new Date());
+            long durationSec = activeMs / 1000L;
+            pw.printf(Locale.US, "%s,%.3f,%d,%.2f%n", date, distKm, durationSec, avgKmh);
+            pw.flush();
+            pw.close();
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to write ride log", e);
+        }
+    }
+
+    /**
+     * Reads the full ride log and returns lines (excluding header).
+     * Each String[] has: [date, dist_km, duration_sec, avg_kmh].
+     */
+    public List<String[]> readRideLog() {
+        List<String[]> rows = new ArrayList<>();
+        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
+        if (!logFile.exists()) return rows;
+        try (BufferedReader br = new BufferedReader(new FileReader(logFile))) {
+            String line;
+            boolean first = true;
+            while ((line = br.readLine()) != null) {
+                if (first) { first = false; continue; } // skip header
+                String[] parts = line.split(",", -1);
+                if (parts.length >= 4) rows.add(parts);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to read ride log", e);
+        }
+        return rows;
+    }
+
+    /** Delete all ride log entries. */
+    public void clearRideLog() {
+        File logFile = new File(getFilesDir(), RIDE_LOG_FILENAME);
+        if (logFile.exists()) logFile.delete();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Heart Rate
+    // ═══════════════════════════════════════════════════════════════════════════
+
     private void checkHrAlert(int bpm) {
         if (!hrAlertEnabled || state != TrackState.RUNNING) return;
         boolean tooLow  = bpm < hrAlertMin;
@@ -606,7 +701,6 @@ public class SpeedometerService extends Service {
         if (inZone) {
             hrOutsideSinceMs = -1;
             if (hrInsideSinceMs < 0) hrInsideSinceMs = now;
-            // Re-arm both alerts after sustained return to zone
             if (now - hrInsideSinceMs >= HR_HYSTERESIS_MS) {
                 hrAlertLowFired  = false;
                 hrAlertHighFired = false;
@@ -614,7 +708,6 @@ public class SpeedometerService extends Service {
         } else {
             hrInsideSinceMs = -1;
             if (hrOutsideSinceMs < 0) hrOutsideSinceMs = now;
-            // Fire alert only after sustained breach
             if (now - hrOutsideSinceMs >= HR_HYSTERESIS_MS) {
                 if (tooLow && !hrAlertLowFired) {
                     hrAlertLowFired = true;
@@ -646,10 +739,6 @@ public class SpeedometerService extends Service {
     // Metronome
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Factory: reads cadence_sensor / cadence_method from SharedPreferences.
-     * gyro+acf (default) | gyro+spectral | accel+acf | accel+spectral
-     */
     private CadenceDetector createCadenceDetector() {
         SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
         boolean useGyro = !"accel".equals(p.getString("cadence_sensor", "gyro"));
@@ -662,7 +751,6 @@ public class SpeedometerService extends Service {
         stopMetronome();
         stopForeground(true);
         stopSelf();
-        // Kill the process so MediaSession / AudioTrack are fully released
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
@@ -695,10 +783,6 @@ public class SpeedometerService extends Service {
             metronomeEngine.setParams(metSoundType, metSoundStrong, metSoundWeak, metVibStrong, metVibWeak);
     }
 
-    /**
-     * MediaSession with VolumeProviderCompat — intercepts hardware volume keys
-     * when screen is OFF. Volume+ → toggle metronome.
-     */
     private void setupMediaSession() {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         metWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VeloSpeedometer::Metro");
@@ -709,7 +793,6 @@ public class SpeedometerService extends Service {
                 VolumeProviderCompat.VOLUME_CONTROL_RELATIVE, 100, 50) {
             private long lastToggleMs = 0;
             @Override public void onAdjustVolume(int direction) {
-                // direction: +1 = Volume Up, -1 = Volume Down
                 if (direction > 0) {
                     long now = System.currentTimeMillis();
                     if (now - lastToggleMs > 500) {
@@ -717,7 +800,6 @@ public class SpeedometerService extends Service {
                         toggleMetronome();
                     }
                 }
-                // Volume Down when screen off: announce speed (same as screen-on double-tap)
                 if (direction < 0) {
                     announceNow(true);
                 }
@@ -743,13 +825,6 @@ public class SpeedometerService extends Service {
         if (!metWakeLock.isHeld()) metWakeLock.acquire(2 * 60 * 60 * 1000L);
         notifyMetronomeChanged();
         metronomeThread = new Thread(() -> {
-            // metronomeBpm = cadence RPM target = strong beats per minute.
-            // If both strong+weak are enabled:
-            //   strong beat at t=0, weak beat at t=halfInterval, next strong at t=fullInterval
-            //   fullInterval  = 60000 / metronomeBpm   (one pedal revolution)
-            //   halfInterval  = fullInterval / 2        (half revolution)
-            // If only strong (or only weak) is enabled:
-            //   single tick at fullInterval
             long nextTime = System.currentTimeMillis();
             while (metronomeRunning) {
                 boolean bothEnabled = metSoundStrong && metSoundWeak;
@@ -761,7 +836,6 @@ public class SpeedometerService extends Service {
                 metronomeEngine.beat(true);
 
                 if (bothEnabled) {
-                    // Sleep half interval then play weak beat
                     nextTime += halfInterval;
                     long s1 = nextTime - System.currentTimeMillis();
                     if (s1 > 0) try { Thread.sleep(s1); } catch (InterruptedException e) { return; }
@@ -787,30 +861,37 @@ public class SpeedometerService extends Service {
     }
 
     /**
-     * Decides metronome volume based on cadence proximity and HR zone.
-     * Full volume when the athlete is "on target"; -12 dB otherwise.
+     * FIX #7: 3-level adaptive metronome volume.
      *
-     * Cadence check: current RPM within ±20 % of metronomeBpm.
-     * HR check: lastHrBpm inside [metHrMin, metHrMax].
-     * Either condition that is active and whose checkbox is ticked → FULL.
-     * If metVolumeAdaptive is off → always FULL.
-     */
-    /**
-     * Adaptive metronome volume.
-     * metCadenceMinPct = X (0–30): tolerance below target BPM.
-     * threshold = metronomeBpm × (1 − X/100)
+     * rpm >= metronomeBpm                          → -18 dB (VOL_DIM):   on-target or above
+     * rpm in (threshold, metronomeBpm)             → -12 dB (VOL_MID):   slightly below target
+     * rpm < threshold = metronomeBpm*(1-pct/100)  →   0 dB (VOL_FULL):  significantly below
+     * no cadence signal (rpm == 0)                 →   0 dB (VOL_FULL):  can't confirm, alert
      *
-     * rpm < threshold  → cadence too low → FULL volume (alert rider).
-     * rpm ≥ threshold  → cadence OK      → DIM  volume (−18 dB, unobtrusive).
-     * No cadence signal → FULL (can't confirm target is met).
+     * threshold = metronomeBpm × (1 − metCadenceMinPct / 100)
      */
     private void updateMetronomeVolume() {
         if (metronomeEngine == null) return;
         if (!metVolumeAdaptive) { metronomeEngine.setVolume(VOL_FULL); return; }
-        float rpm       = lastCadenceResult != null ? lastCadenceResult.rpm : 0;
+
+        float rpm       = lastCadenceResult != null ? lastCadenceResult.rpm : 0f;
         float threshold = metronomeBpm * (1f - metCadenceMinPct / 100f);
-        boolean onTarget = (rpm > 0 && rpm >= threshold);
-        metronomeEngine.setVolume(onTarget ? VOL_DIM : VOL_FULL);
+
+        final float vol;
+        if (rpm <= 0f) {
+            // No cadence signal — use full volume to alert the rider
+            vol = VOL_FULL;
+        } else if (rpm >= metronomeBpm) {
+            // On target or above — dim to -18 dB (unobtrusive)
+            vol = VOL_DIM;
+        } else if (rpm >= threshold) {
+            // Within tolerance band below target — medium -12 dB
+            vol = VOL_MID;
+        } else {
+            // Below threshold — full volume alert
+            vol = VOL_FULL;
+        }
+        metronomeEngine.setVolume(vol);
     }
 
     public void stopMetronome() {
@@ -828,7 +909,6 @@ public class SpeedometerService extends Service {
         metronomeBpm = Math.max(40, Math.min(180, bpm));
         getSharedPreferences("settings", MODE_PRIVATE).edit()
                 .putInt("metro_bpm", metronomeBpm).apply();
-        // BPM change is picked up on next beat interval naturally
     }
 
     public void setMetronomeParams(int soundType, boolean ss, boolean sw, boolean vs, boolean vw) {
@@ -884,7 +964,6 @@ public class SpeedometerService extends Service {
     public boolean isMetVibStrong()  { return metVibStrong; }
     public boolean isMetVibWeak()    { return metVibWeak; }
 
-    /** Called when metronome start/stop changes — inform UI. */
     private void notifyMetronomeChanged() {
         handler.post(() -> { if (listener != null) listener.onMetronomeChanged(metronomeRunning); });
     }
@@ -893,15 +972,13 @@ public class SpeedometerService extends Service {
         tts = new TextToSpeech(this, status -> {
             if (status != TextToSpeech.SUCCESS) return;
 
-            // User-selected language overrides system locale.
-            // "auto" = detect from system locale (original behavior).
             SharedPreferences prefs = getSharedPreferences("settings", MODE_PRIVATE);
             String pref = prefs.getString("tts_lang", "auto");
             String resolved;
             if ("auto".equals(pref)) {
                 resolved = Locale.getDefault().getLanguage();
             } else {
-                resolved = pref;  // "uk", "ru", or "en"
+                resolved = pref;
             }
 
             Locale ttsLocale;
@@ -931,12 +1008,6 @@ public class SpeedometerService extends Service {
         });
     }
 
-    /**
-     * Enqueue speech. All normal announcements use QUEUE_ADD so they never
-     * interrupt each other — timers simply add to the TTS queue.
-     * Pass urgent=true ONLY for immediate alerts (HR zone breach) which
-     * use QUEUE_FLUSH and bypass the queue entirely.
-     */
     private void speak(String text) { speak(text, false); }
 
     private void speak(String text, boolean urgent) {
@@ -949,7 +1020,6 @@ public class SpeedometerService extends Service {
         boolean screenOff = pm != null && !pm.isInteractive();
 
         if (urgent) {
-            // Urgent alert: cancel queue and speak immediately
             if (audioEnhancer != null) audioEnhancer.cancel();
             if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
                 audioEnhancer.speak(text, null);
@@ -959,7 +1029,6 @@ public class SpeedometerService extends Service {
                 tts.speak(text, TextToSpeech.QUEUE_FLUSH, p, "sb_urgent");
             }
         } else {
-            // Normal: enqueue — independent timers don't interrupt each other
             if (enhancedAudioEnabled && screenOff && audioEnhancer != null) {
                 audioEnhancer.speak(text, null);
             } else {
@@ -972,7 +1041,6 @@ public class SpeedometerService extends Service {
 
     // ── Локализация ───────────────────────────────────────────────────────────
 
-    /** Выбирает строку по текущему языку TTS. */
     private String str(String en, String uk, String ru) {
         switch (lang) {
             case "uk": return uk;
@@ -992,11 +1060,9 @@ public class SpeedometerService extends Service {
         if (r.stable && r.rpm > 0f) {
             s += ". " + str("Cadence ", "Каденс ", "Круть ") + Math.round(r.rpm);
         } else if (r.stableAvgRpm > 0f) {
-            // Unstable right now but have recent history — announce average
             s += ". " + str("Cadence approx ", "Каденс приблизно ", "Круть около ")
                  + Math.round(r.stableAvgRpm);
         } else if (r.rpm > 0f) {
-            // Detected something but not confident
             s += ". " + str("Cadence unstable", "Каденс нестабільний", "Частота педалирования нестабильная");
         }
         if (doAnnounceHr && lastHrBpm > 0)
@@ -1004,15 +1070,10 @@ public class SpeedometerService extends Service {
         return s;
     }
 
-    /** Format milliseconds as h:mm:ss or m:ss */
     private static float dBtoLinear(float dB) {
         return (float) Math.pow(10.0, dB / 20.0);
     }
 
-    /**
-     * Format duration for TTS — avoids clock-notation which TTS reads as time-of-day.
-     * Returns natural-language string: "2 hours 5 minutes", "45 minutes 30 seconds", etc.
-     */
     private String fmtDuration(long ms) {
         long total = ms / 1000;
         long h = total / 3600; total %= 3600;
@@ -1036,7 +1097,6 @@ public class SpeedometerService extends Service {
                 default:   sb.append(m == 1 ? " minute" : " minutes"); break;
             }
         }
-        // Show seconds only when less than 5 minutes total
         if (h == 0 && m < 5 && s > 0) {
             if (sb.length() > 0) sb.append(" ");
             sb.append(s);
@@ -1059,9 +1119,6 @@ public class SpeedometerService extends Service {
                 default:   return String.format(Locale.US, "%.0f meters", km * 1000);
             }
         }
-        // Always use Locale.US for formatting, then replace "." → "," for ru/uk
-        // so TTS reads "1,5 километров" not "1.5" (which sounds like "one point five"
-        // or worse, "one. End of sentence. Five kilometers").
         String s;
         switch (lang) {
             case "uk":
@@ -1075,7 +1132,7 @@ public class SpeedometerService extends Service {
         }
     }
 
-    // ── Канал уведомлений ─────────────────────────────────────────────────────
+    // ── Notification ─────────────────────────────────────────────────────────
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1129,10 +1186,8 @@ public class SpeedometerService extends Service {
         if (listener != null) listener.onStateChanged(state);
     }
 
-    /** Автоматическая пауза из-за долгого простоя. */
     private void autoPause() {
         if (state != TrackState.RUNNING) return;
-        // speak() вызываем ДО смены состояния, иначе он блокируется проверкой PAUSED
         speak(str(
             "You've been stopped for a while. Auto-paused.",
             "Ви довго стоїте. Лог на паузі.",
@@ -1149,7 +1204,6 @@ public class SpeedometerService extends Service {
                 calculator.getTotalDistanceKm());
     }
 
-    /** Call to switch TTS language immediately without restarting the ride. */
     public void reinitTts() {
         ttsReady = false;
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
@@ -1157,21 +1211,20 @@ public class SpeedometerService extends Service {
         initTts();
     }
 
-    /** Применяет новые настройки немедленно, не останавливая поездку. */
     public void reloadSettings() {
         boolean prevScreenAnnounce = screenAnnounceEnabled;
         boolean prevDoAnnounceAvg  = doAnnounceAvg;
         loadSettings();
 
-        // Пересоздаём детектор каденса всегда — не зависит от состояния поездки.
-        // Именно здесь менялся датчик (gyro/accel): раньше ранний return это блокировал.
         boolean wasRunning = (state == TrackState.RUNNING);
         cadenceDetector.stop();
         cadenceDetector = createCadenceDetector();
-        if (wasRunning) cadenceDetector.start();
+        // FIX #1+#2: always pass shared rideStartMs when restarting detector
+        if (wasRunning) cadenceDetector.start(rideStartMs);
         // Reconnect HR if device changed
         String hrAddr = getSharedPreferences("settings", MODE_PRIVATE).getString("hr_device_address", null);
         heartRateMonitor.disconnect();
+        lastHrBattery = -1;
         if (hrAddr != null) heartRateMonitor.connect(hrAddr);
         // Reschedule HR timer
         if (hrAnnounceRunnable != null) handler.removeCallbacks(hrAnnounceRunnable);
@@ -1181,15 +1234,12 @@ public class SpeedometerService extends Service {
         if (rideTimeRunnable != null) handler.removeCallbacks(rideTimeRunnable);
         if (doAnnounceRideTime && state == TrackState.RUNNING) scheduleRideTimeTimer();
 
-        // Остальное только если поездка активна
         if (state == TrackState.STOPPED) return;
 
-        // Перезапускаем avg-таймер если изменилась галка или интервал
         if (prevDoAnnounceAvg || doAnnounceAvg) {
             if (avgRunnable != null) handler.removeCallbacks(avgRunnable);
             if (doAnnounceAvg && state == TrackState.RUNNING) scheduleAvgTimer();
         }
-        // Обновляем регистрацию screen-receiver если галка изменилась
         if (prevScreenAnnounce != screenAnnounceEnabled) {
             unregisterScreenReceiver();
             if (screenAnnounceEnabled) registerScreenReceiver();

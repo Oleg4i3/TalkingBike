@@ -20,7 +20,7 @@ import java.util.Locale;
 /**
  * Two-panel chart in one View:
  *   TOP 65%  — raw |accel| (m/s²) + cadence overlay (RPM)
- *   BOTTOM 35% — GPS speed (km/h)
+ *   BOTTOM 35% — GPS speed (km/h) + HR (bpm)
  *
  * Both panels share the same X (time) axis, scroll and zoom together.
  *
@@ -148,10 +148,17 @@ public class AccelChartView extends View {
         pLabelL.setColor(0xFF555555); pLabelL.setTextSize(sp10);
         pLabelR.setColor(0xFFAA9900); pLabelR.setTextSize(sp10);
         pLabelS.setColor(0xFF3A7A3A); pLabelS.setTextSize(sp10);
+
         pHr.setColor(0xFFFF3333); pHr.setStyle(Paint.Style.STROKE);
         pHr.setStrokeWidth(2.2f); pHr.setStrokeJoin(Paint.Join.ROUND);
-        pHrGrid.setColor(0x44CC2222); pHrGrid.setStyle(Paint.Style.STROKE); pHrGrid.setStrokeWidth(1f);
+
+        // FIX #3: HR grid lines were 0x44 alpha (very faint). Changed to 0xBB (75% opacity)
+        // so the horizontal zone lines are clearly visible in the HR/speed panel.
+        pHrGrid.setColor(0xBBCC2222);
+        pHrGrid.setStyle(Paint.Style.STROKE);
+        pHrGrid.setStrokeWidth(1f);
         pHrGrid.setPathEffect(new DashPathEffect(new float[]{6, 6}, 0));
+
         pHrLabel.setColor(0xFFCC2222); pHrLabel.setTextSize(sp10);
         pLive.setColor(0xFFFF6B35);   pLive.setTextSize(sp12); pLive.setFakeBoldText(true);
 
@@ -363,7 +370,7 @@ public class AccelChartView extends View {
         // ── Divider bar ───────────────────────────────────────────────────────
         canvas.drawRect(0, accelH, W, accelH + divPx, pDiv);
 
-        // ══ BOTTOM PANEL: speed ═══════════════════════════════════════════════
+        // ══ BOTTOM PANEL: speed + HR ══════════════════════════════════════════
         canvas.save();
         canvas.translate(0, accelH + divPx);
         canvas.clipRect(0, 0, W, speedH);

@@ -16,12 +16,14 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
 
+import java.util.List;
 import java.util.Locale;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -56,6 +58,9 @@ public class MainActivity extends AppCompatActivity
     private TextView    tvUnit;
     private boolean     metronomeUiReady = false;
     private static final long DBL = 500;
+
+    // FIX #6: battery level display
+    private int lastHrBattery = -1;
 
     private final android.os.Handler cadenceHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable cadenceRunnable = new Runnable() {
@@ -131,6 +136,10 @@ public class MainActivity extends AppCompatActivity
         findViewById(R.id.btnCadenceGraph).setOnClickListener(v ->
                 startActivity(new Intent(this, CadenceGraphActivity.class)));
 
+        // FIX #5: ride log viewer button
+        View btnLog = findViewById(R.id.btnRideLog);
+        if (btnLog != null) btnLog.setOnClickListener(v -> showRideLog());
+
         checkPermission();
     }
 
@@ -158,6 +167,7 @@ public class MainActivity extends AppCompatActivity
             refreshUI(service.getState());
             syncMetronomeUi();
             // Restore HR visibility after bind
+            lastHrBattery = service.getLastHrBattery();
             onHrChanged(service.getLastHrBpm(), service.getLastHrBpm() > 0);
         }
         @Override public void onServiceDisconnected(ComponentName n) { bound = false; }
@@ -187,7 +197,6 @@ public class MainActivity extends AppCompatActivity
         service.setMetVolumeAdaptive(on, pct);
     }
 
-    /** Push current UI state to service. */
     private void pushMetParams() {
         if (!bound || !metronomeUiReady) return;
         int soundType = 0;
@@ -199,7 +208,6 @@ public class MainActivity extends AppCompatActivity
                 cbMetVibStrong.isChecked(),   cbMetVibWeak.isChecked());
     }
 
-    /** Sync metronome UI widgets from service state (called on bind/reconnect). */
     private void syncMetronomeUi() {
         if (!bound || !metronomeUiReady) return;
         int bpm = service.getMetronomeBpm();
@@ -246,6 +254,10 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    /**
+     * FIX #6: shows HR bpm AND battery level when available.
+     * Format: "♥ 72  🔋43%"  or just "♥ 72" if battery not read yet.
+     */
     @Override
     public void onHrChanged(int bpm, boolean connected) {
         runOnUiThread(() -> {
@@ -254,9 +266,23 @@ public class MainActivity extends AppCompatActivity
                     && getSharedPreferences("settings", MODE_PRIVATE)
                        .getBoolean("announce_hr", false);
             tvHr.setVisibility(showHr ? View.VISIBLE : View.GONE);
-            if (!connected || bpm <= 0) tvHr.setText("♥ --");
-            else tvHr.setText("♥ " + bpm);
+            if (!connected || bpm <= 0) {
+                tvHr.setText("♥ --");
+            } else {
+                String batStr = (lastHrBattery >= 0) ? "  🔋" + lastHrBattery + "%" : "";
+                tvHr.setText("♥ " + bpm + batStr);
+            }
         });
+    }
+
+    /** FIX #6: called when battery level arrives from HeartRateMonitor */
+    @Override
+    public void onHrBattery(int percent) {
+        lastHrBattery = percent;
+        // Refresh HR display to include new battery info
+        if (bound && service != null) {
+            onHrChanged(service.getLastHrBpm(), service.getLastHrBpm() > 0);
+        }
     }
 
     @Override
@@ -296,7 +322,6 @@ public class MainActivity extends AppCompatActivity
                 btnStart.setVisibility(View.VISIBLE);
                 llRunning.setVisibility(View.GONE);
                 tvPauseLabel.setVisibility(View.GONE);
-                // Ride emoji + water/snack reminder when idle
                 tvSpeed.setText("\uD83D\uDEB4");
                 if (tvUnit != null)
                     tvUnit.setText("\uD83C\uDF4C  \uD83D\uDEB0  \uD83D\uDCA7");
@@ -321,6 +346,97 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    // ── FIX #5: Ride Log viewer ───────────────────────────────────────────────
+
+    private void showRideLog() {
+        if (!bound || service == null) return;
+        List<String[]> rows = service.readRideLog();
+
+        if (rows.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Ride Log")
+                    .setMessage("No rides recorded yet.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+
+        // Compute summary
+        double totalDistKm  = 0;
+        double totalTimeSec = 0;
+        double totalAvgKmh  = 0;
+        int    count        = rows.size();
+        for (String[] r : rows) {
+            try { totalDistKm  += Double.parseDouble(r[1]); } catch (Exception ignored) {}
+            try { totalTimeSec += Double.parseDouble(r[2]); } catch (Exception ignored) {}
+            try { totalAvgKmh  += Double.parseDouble(r[3]); } catch (Exception ignored) {}
+        }
+        double avgDistKm   = totalDistKm  / count;
+        double avgTimeSec  = totalTimeSec / count;
+        double avgSpeedKmh = totalAvgKmh  / count;
+
+        // Build recent rides text (last 20)
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(Locale.US,
+                "═══ SUMMARY (%d rides) ═══\n" +
+                "Total distance:  %.1f km\n" +
+                "Total time:      %s\n" +
+                "Avg dist/ride:   %.1f km\n" +
+                "Avg time/ride:   %s\n" +
+                "Avg speed:       %.1f km/h\n\n" +
+                "═══ RECENT RIDES ═══\n",
+                count,
+                totalDistKm,
+                fmtSecDuration((long) totalTimeSec),
+                avgDistKm,
+                fmtSecDuration((long) avgTimeSec),
+                avgSpeedKmh));
+
+        int start = Math.max(0, rows.size() - 20);
+        for (int i = rows.size() - 1; i >= start; i--) {
+            String[] r = rows.get(i);
+            try {
+                double dist = Double.parseDouble(r[1]);
+                long   sec  = (long) Double.parseDouble(r[2]);
+                double spd  = Double.parseDouble(r[3]);
+                sb.append(String.format(Locale.US,
+                        "%s\n  %.2f km  %s  %.1f km/h\n",
+                        r[0], dist, fmtSecDuration(sec), spd));
+            } catch (Exception e) {
+                sb.append(String.join(",", r)).append("\n");
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Ride Log")
+                .setMessage(sb.toString())
+                .setPositiveButton("Close", null)
+                .setNeutralButton("Clear log", (d, w) -> confirmClearLog())
+                .show();
+    }
+
+    private void confirmClearLog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Clear ride log?")
+                .setMessage("This will delete all recorded rides. This cannot be undone.")
+                .setPositiveButton("Clear", (d, w) -> {
+                    if (bound && service != null) service.clearRideLog();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Format total seconds to h:mm or mm:ss for display (not TTS). */
+    private static String fmtSecDuration(long totalSec) {
+        long h = totalSec / 3600;
+        long m = (totalSec % 3600) / 60;
+        long s = totalSec % 60;
+        if (h > 0) return String.format(Locale.US, "%dh %02dm", h, m);
+        return String.format(Locale.US, "%dm %02ds", m, s);
+    }
+
+    // ── Volume key handling ───────────────────────────────────────────────────
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         if (!bound) return super.dispatchKeyEvent(e);
@@ -333,8 +449,6 @@ public class MainActivity extends AppCompatActivity
                 if (t - lastVolDown < DBL) service.announceNow(true);
                 lastVolDown = t;
             } else { // VOLUME_UP
-                // Single press → toggle metronome
-                // Double press → toggle ride pause
                 if (t - lastVolUp < DBL) {
                     service.togglePause();
                 } else {
@@ -345,6 +459,8 @@ public class MainActivity extends AppCompatActivity
         }
         return true;
     }
+
+    // ── Permissions ───────────────────────────────────────────────────────────
 
     private boolean hasPermission() {
         return ContextCompat.checkSelfPermission(this,
@@ -382,6 +498,5 @@ public class MainActivity extends AppCompatActivity
             bindService();
             requestNotifPermission();
         }
-        // PERM_NOTIF — система сама разблокирует канал после согласия
     }
 }

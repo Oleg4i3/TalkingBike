@@ -125,6 +125,14 @@ public class CadenceDetector implements SensorEventListener {
     private final Deque<long[]> stableHistory = new ArrayDeque<>();
     private final List<float[]> rawSamples    = new ArrayList<>();
     private final List<float[]> cadenceHistory= new ArrayList<>();
+
+    /**
+     * FIX (bugs 1+2): rideStartMs is now set externally by SpeedometerService
+     * so sensor timestamps and GPS/HR timestamps use the same time origin.
+     * Previously this was set independently in start(), causing a small but
+     * visible drift between the top (sensor) and bottom (speed/HR) chart panels,
+     * and repeating/misaligned cadence values in the ride CSV.
+     */
     private long rideStartMs = -1;
 
     private Result lastResult = Result.EMPTY;
@@ -146,7 +154,12 @@ public class CadenceDetector implements SensorEventListener {
         this.useAcf   = useAcf;
     }
 
-    public void start() {
+    /**
+     * Start with an externally-provided ride start timestamp.
+     * Call this from SpeedometerService.startTracking() passing service.rideStartMs
+     * so both the sensor data and GPS/HR data share the same time origin.
+     */
+    public void start(long extRideStartMs) {
         int sensorType = useGyro ? Sensor.TYPE_GYROSCOPE : Sensor.TYPE_ACCELEROMETER;
         Sensor sensor  = sensorManager.getDefaultSensor(sensorType);
         if (sensor != null)
@@ -154,13 +167,18 @@ public class CadenceDetector implements SensorEventListener {
 
         head = 0; filled = 0; stepCount = 0;
         lpfX = 0f; lpfY = 0f; lpfZ = 0f;
-        rideStartMs = System.currentTimeMillis();
+        rideStartMs = extRideStartMs;   // ← use external timestamp (FIX bug 1+2)
         recentRpm.clear();
         synchronized (stableHistory)  { stableHistory.clear(); }
         synchronized (rawSamples)     { rawSamples.clear(); }
         synchronized (cadenceHistory) { cadenceHistory.clear(); }
         lastResult = Result.EMPTY;
         paused = false;   // always start fresh
+    }
+
+    /** Convenience overload — uses current wall clock. Prefer start(long) when possible. */
+    public void start() {
+        start(System.currentTimeMillis());
     }
 
     public void stop() {
