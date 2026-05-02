@@ -22,6 +22,17 @@
             android:text="@string/btn_cadence_graph" android:textSize="12sp"
             android:textColor="@color/colorTextSecondary"
             app:strokeColor="@color/colorDivider" app:cornerRadius="8dp"/>
+        <!-- Ride Log button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRideLog"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content" android:layout_height="36dp"
+            android:layout_toEndOf="@id/btnCadenceGraph"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="6dp"
+            android:text="LOG" android:textSize="12sp"
+            android:textColor="@color/colorTextSecondary"
+            app:strokeColor="@color/colorDivider" app:cornerRadius="8dp"/>
         <!-- EXIT button — kills service + process -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnExit"
